@@ -48,4 +48,3 @@ bin/
 .kube.local.yaml
 
 # Secrets baseline (generated, not edited)
-.secrets.baseline
