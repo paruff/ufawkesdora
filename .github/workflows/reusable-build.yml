@@ -1,0 +1,152 @@
+name: Reusable Build & Validate
+
+on:
+  workflow_call:
+    inputs:
+      validate-prometheus:
+        description: "Validate Prometheus config"
+        required: false
+        type: boolean
+        default: false
+      validate-otel:
+        description: "Validate OTel Collector config"
+        required: false
+        type: boolean
+        default: false
+      validate-tempo:
+        description: "Validate Tempo config"
+        required: false
+        type: boolean
+        default: false
+      validate-grafana:
+        description: "Validate Grafana provisioning"
+        required: false
+        type: boolean
+        default: false
+      prometheus-image:
+        description: "Prometheus image for config validation"
+        required: false
+        type: string
+        default: "prom/prometheus:v2.55.1"
+      otel-image:
+        description: "OTel Collector image for config validation"
+        required: false
+        type: string
+        default: "otel/opentelemetry-collector-contrib:0.120.0"
+      tempo-image:
+        description: "Tempo image for config validation"
+        required: false
+        type: string
+        default: "grafana/tempo:2.10.5"
+      fail-on-latest:
+        description: "Fail if :latest tags found in compose.yaml"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-validate:
+    name: Build & Validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: DORA job start
+        run: |
+          echo "job-start:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "sha:${{ github.sha }}"
+          echo "workflow:${{ github.workflow }}"
+          echo "job:${{ github.job }}"
+
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      # ─── Supply Chain ────────────────────────────────────────────────────
+      - name: Fail if ':latest' is used
+        if: inputs.fail-on-latest
+        run: |
+          if grep -R "image: .*:latest" -n compose.yaml; then
+            echo "::error::Do not use :latest tags in compose.yaml"
+            exit 1
+          fi
+          echo "✅ No :latest tags found"
+
+      # ─── Config Validation: Prometheus ──────────────────────────────────
+      - name: Validate Prometheus config
+        if: inputs.validate-prometheus && hashFiles('config/prometheus/prometheus.yaml') != ''
+        run: |
+          echo "Validating Prometheus config..."
+          docker run --rm \
+            -v $PWD/config/prometheus:/etc/prometheus \
+            --entrypoint promtool \
+            ${{ inputs.prometheus-image }} \
+            check config /etc/prometheus/prometheus.yaml
+          echo "✅ Prometheus config valid"
+
+      # ─── Config Validation: OTel Collector ──────────────────────────────
+      - name: Validate OTel config
+        if: inputs.validate-otel && hashFiles('config/otel/collector.yaml') != ''
+        run: |
+          echo "Validating OTel Collector config..."
+          docker run --rm \
+            -v $PWD/config/otel/collector.yaml:/etc/otel/config.yaml \
+            ${{ inputs.otel-image }} \
+            validate --config=/etc/otel/config.yaml
+          echo "✅ OTel Collector config valid"
+
+      # ─── Config Validation: Tempo ───────────────────────────────────────
+      - name: Validate Tempo config
+        if: inputs.validate-tempo && hashFiles('config/tempo/tempo.yaml') != ''
+        run: |
+          echo "Validating Tempo config..."
+          docker run --rm \
+            -v $PWD/config/tempo/tempo.yaml:/etc/tempo.yaml \
+            ${{ inputs.tempo-image }} \
+            -config.file=/etc/tempo.yaml -config.verify=true
+          echo "✅ Tempo config valid"
+
+      # ─── Config Validation: Grafana ─────────────────────────────────────
+      - name: Validate Grafana provisioning
+        if: inputs.validate-grafana
+        run: |
+          echo "Checking Grafana provisioning files..."
+          if [ -d "config/grafana/provisioning" ]; then
+            find config/grafana/provisioning -name "*.yaml" -o -name "*.yml" | while read f; do
+              echo "Checking: $f"
+              python3 -c "import yaml; yaml.safe_load(open('$f'))" || { echo "❌ Invalid YAML: $f"; exit 1; }
+            done
+            echo "✅ Grafana provisioning configs valid"
+          else
+            echo "⚠️  No Grafana provisioning directory found"
+          fi
+
+      # ─── Build Summary ──────────────────────────────────────────────────
+      - name: Generate build summary
+        if: always()
+        run: |
+          echo "### Build & Validate Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ inputs.fail-on-latest }}" == "true" ]; then
+            echo "- ✅ Supply chain: No :latest tags" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ inputs.validate-prometheus }}" == "true" ]; then
+            echo "- ✅ Prometheus config validated" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ inputs.validate-otel }}" == "true" ]; then
+            echo "- ✅ OTel Collector config validated" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ inputs.validate-tempo }}" == "true" ]; then
+            echo "- ✅ Tempo config validated" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ inputs.validate-grafana }}" == "true" ]; then
+            echo "- ✅ Grafana provisioning validated" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: DORA job finish
+        if: always()
+        run: echo "job-finish:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
