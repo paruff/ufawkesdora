@@ -1,0 +1,82 @@
+name: CI Tests
+
+on:
+  workflow_call:
+    inputs:
+      timeout-minutes:
+        description: "Total test timeout in minutes"
+        required: false
+        type: number
+        default: 30
+
+permissions:
+  contents: read
+
+jobs:
+  # ─── Unit Tests ────────────────────────────────────────────────────────────
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: DORA job start
+        run: |
+          echo "job-start:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "sha:${{ github.sha }}"
+          echo "workflow:${{ github.workflow }}"
+          echo "job:${{ github.job }}"
+
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: |
+          pip install pytest pytest-cov pyyaml
+
+      - name: Run unit tests
+        run: |
+          if [ -d "tests/unit" ]; then
+            pytest tests/unit/ -v --tb=short --cov=tests/unit --cov-report=term-missing
+          else
+            echo "No unit tests found, skipping"
+          fi
+        continue-on-error: false
+
+      - name: DORA job finish
+        if: always()
+        run: echo "job-finish:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  # ─── Test Summary ──────────────────────────────────────────────────────────
+  test-summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [unit-tests]
+    if: always()
+    steps:
+      - name: Check results
+        run: |
+          echo "=== Test Results ==="
+          echo "Unit Tests:         ${{ needs.unit-tests.result }}"
+
+          if [ "${{ needs.unit-tests.result }}" == "failure" ]; then
+            echo ""
+            echo "❌ Tests FAILED"
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ All tests PASSED"
+
+      - name: Generate summary
+        if: always()
+        run: |
+          echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Tier | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Unit | ${{ needs.unit-tests.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
