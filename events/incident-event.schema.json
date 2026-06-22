@@ -1,0 +1,64 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schemas.ufawkes.dev/dora/incident-event.schema.json",
+  "title": "Incident Event",
+  "description": "Canonical schema for incident lifecycle events used to compute Time to Restore and track incident severity.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "description": "Semantic version of the schema.",
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+$"
+    },
+    "event_type": {
+      "description": "Discriminant for event routing. Must be 'incident'.",
+      "type": "string",
+      "const": "incident"
+    },
+    "incident_id": {
+      "description": "Unique identifier for the incident (e.g., PagerDuty or incident-management system ID).",
+      "type": "string",
+      "minLength": 1
+    },
+    "repo": {
+      "description": "Repository identifier (e.g., 'org/repo-name').",
+      "type": "string",
+      "minLength": 1
+    },
+    "service": {
+      "description": "Service or component affected by the incident.",
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "description": "Lifecycle stage of the incident.",
+      "type": "string",
+      "enum": ["opened", "resolved"]
+    },
+    "occurred_at": {
+      "description": "ISO 8601 timestamp of when the incident was opened or resolved.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "linked_deployment_sha": {
+      "description": "Commit SHA of the deployment that triggered or resolved the incident, if known.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "severity": {
+      "description": "Severity level of the incident (e.g., 'SEV1', 'SEV2', 'SEV3').",
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "schema_version",
+    "event_type",
+    "incident_id",
+    "repo",
+    "service",
+    "status",
+    "occurred_at"
+  ],
+  "additionalProperties": false
+}

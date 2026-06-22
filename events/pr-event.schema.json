@@ -1,0 +1,74 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schemas.ufawkes.dev/dora/pr-event.schema.json",
+  "title": "Pull Request Event",
+  "description": "Canonical schema for pull request lifecycle events used to compute Lead Time and track PR throughput.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "description": "Semantic version of the schema.",
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+$"
+    },
+    "event_type": {
+      "description": "Discriminant for event routing. Must be 'pr'.",
+      "type": "string",
+      "const": "pr"
+    },
+    "repo": {
+      "description": "Repository identifier (e.g., 'org/repo-name').",
+      "type": "string",
+      "minLength": 1
+    },
+    "pr_number": {
+      "description": "Pull request number.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "commit_sha": {
+      "description": "Full SHA of the latest commit on the PR at the time of the event.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "status": {
+      "description": "Lifecycle stage of the pull request.",
+      "type": "string",
+      "enum": ["opened", "merged", "closed"]
+    },
+    "occurred_at": {
+      "description": "ISO 8601 timestamp of when the PR event occurred.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "first_commit_at": {
+      "description": "ISO 8601 timestamp of the first commit in the PR branch.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "lines_added": {
+      "description": "Net lines of code added.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "lines_deleted": {
+      "description": "Net lines of code deleted.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "ai_assisted": {
+      "description": "Whether AI tooling was used in generating or reviewing the PR.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "schema_version",
+    "event_type",
+    "repo",
+    "pr_number",
+    "commit_sha",
+    "status",
+    "occurred_at",
+    "first_commit_at"
+  ],
+  "additionalProperties": false
+}
