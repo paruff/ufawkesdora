@@ -1,0 +1,41 @@
+# ============================================================================
+# docker-compose.dev.yml
+# ----------------------------------------------------------------------------
+# Local TimescaleDB for standalone uFawkesDORA development.
+# Starts a TimescaleDB instance with init scripts applied automatically.
+#
+# Usage:
+#   docker compose -f docker-compose.dev.yml up -d
+#   docker compose -f docker-compose.dev.yml down
+#
+# Environment variables are loaded from .env (gitignored).
+# ============================================================================
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: ufawkesdora-timescaledb
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-dora_metrics}
+      TIMESCALEDB_TELEMETRY: off
+    volumes:
+      # Init scripts — applied in alphanumeric order on first start
+      - ./database/init:/docker-entrypoint-initdb.d/init:ro
+      - ./database/timescaledb:/docker-entrypoint-initdb.d/timescaledb:ro
+      # Persist data across restarts
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  pgdata:
+    name: ufawkesdora_pgdata

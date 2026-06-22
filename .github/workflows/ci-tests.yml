@@ -36,7 +36,7 @@ jobs:
 
       - name: Install test dependencies
         run: |
-          pip install pytest pytest-cov pyyaml
+          pip install pytest pytest-cov pyyaml testcontainers psycopg2-binary
 
       - name: Run unit tests
         run: |

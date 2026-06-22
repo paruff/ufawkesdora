@@ -11,10 +11,10 @@ test: test-unit ## Run all tests
 	@echo "All tests passed"
 
 test-unit: ## Run unit tests
-	pytest tests/unit/ -v --tb=short
+	DOCKER_HOST="unix:///Users/philruff/.docker/run/docker.sock" pytest tests/unit/ -v --tb=short
 
 test-coverage: ## Run tests with coverage report
-	pytest tests/unit/ -v --tb=short --cov=tests/unit --cov-report=term-missing
+	DOCKER_HOST="unix:///Users/philruff/.docker/run/docker.sock" pytest tests/unit/ -v --tb=short --cov=tests/unit --cov-report=term-missing
 
 # ============================================================================
 # Validation Commands
@@ -33,6 +33,30 @@ pre-commit-setup: ## Install pre-commit hooks
 
 pre-commit-run: ## Run all pre-commit hooks
 	@pre-commit run --all-files
+
+# ============================================================================
+# Cleanup
+# ============================================================================
+
+# ============================================================================
+# Database Commands (local dev with docker-compose.dev.yml)
+# ============================================================================
+
+db-up: ## Start local TimescaleDB for development
+	docker compose -f docker-compose.dev.yml up -d
+
+db-down: ## Stop local TimescaleDB
+	docker compose -f docker-compose.dev.yml down
+
+db-reset: db-down ## Recreate local TimescaleDB (down + remove volume + up)
+	docker compose -f docker-compose.dev.yml down -v
+	docker compose -f docker-compose.dev.yml up -d
+
+db-psql: ## Connect to local TimescaleDB via psql
+	@psql -h localhost -p 5432 -U postgres -d dora_metrics
+
+db-logs: ## View TimescaleDB logs
+	docker compose -f docker-compose.dev.yml logs -f
 
 # ============================================================================
 # Cleanup
