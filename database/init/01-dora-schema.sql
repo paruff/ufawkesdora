@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS event_queue (
     payload         JSONB           NOT NULL,
     status          VARCHAR(32)     NOT NULL DEFAULT 'pending'
                                     CHECK (status IN ('pending', 'processing', 'done', 'error')),
+    attempts        SMALLINT        NOT NULL DEFAULT 0,
     received_at     TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
     processed_at    TIMESTAMPTZ
 );
