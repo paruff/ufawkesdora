@@ -24,9 +24,13 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-dora_metrics}
       TIMESCALEDB_TELEMETRY: off
     volumes:
-      # Init scripts — applied in alphanumeric order on first start
-      - ./database/init:/docker-entrypoint-initdb.d/init:ro
-      - ./database/timescaledb:/docker-entrypoint-initdb.d/timescaledb:ro
+      # Init scripts — mounted flat (PostgreSQL only processes files directly
+      # in /docker-entrypoint-initdb.d/, not subdirectories).
+      # Named with numeric prefixes for correct execution order.
+      - ./database/init/00-create-databases.sh:/docker-entrypoint-initdb.d/00-create-databases.sh:ro
+      - ./database/init/01-dora-schema.sql:/docker-entrypoint-initdb.d/01-dora-schema.sql:ro
+      - ./database/init/02-dora-roles.sql:/docker-entrypoint-initdb.d/02-dora-roles.sql:ro
+      - ./database/timescaledb/hypertables.sql:/docker-entrypoint-initdb.d/03-hypertables.sql:ro
       # Persist data across restarts
       - pgdata:/var/lib/postgresql/data
     healthcheck:
