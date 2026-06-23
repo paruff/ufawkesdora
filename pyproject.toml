@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=70.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ufawkesdora"
+version = "0.1.0"
+description = "uFawkes DORA metrics platform"
+requires-python = ">=3.11"
+
+[tool.setuptools.packages.find]
+include = ["ingestion*", "compute*"]

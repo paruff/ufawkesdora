@@ -1,0 +1,212 @@
+{
+  "meta": {
+    "title": "Resource Plane Postgres Schema with TimescaleDB",
+    "issue": "Issue 1",
+    "estimate": "1 session (2hrs)",
+    "dora_capability": "AI Capability 2 (Healthy data ecosystems)"
+  },
+  "tasks": [
+    {
+      "id": "TASK-001",
+      "title": "Create database init directory structure",
+      "agent": "build",
+      "skills": ["build"],
+      "estimated_lines": 5,
+      "dependencies": [],
+      "acceptance_criteria": [
+        "database/ directory exists with init/, timescaledb/, migrations/ subdirectories"
+      ],
+      "description": "Create the directory structure for all database scripts"
+    },
+    {
+      "id": "TASK-002",
+      "title": "Implement 00-create-databases.sh",
+      "agent": "build",
+      "skills": ["build"],
+      "estimated_lines": 40,
+      "dependencies": ["TASK-001"],
+      "acceptance_criteria": [
+        "Creates dora_metrics, infisical, defectdojo databases",
+        "Creates least-privilege roles via psql",
+        "No environment variable injection for credentials",
+        "Idempotent (safe to re-run)"
+      ],
+      "description": "Create the idempotent database creation script using psql with DO $$ blocks"
+    },
+    {
+      "id": "TASK-003",
+      "title": "Implement 01-dora-schema.sql",
+      "agent": "build",
+      "skills": ["build"],
+      "estimated_lines": 120,
+      "dependencies": ["TASK-001"],
+      "acceptance_criteria": [
+        "Creates event_queue table with all columns per design",
+        "Creates raw_events table with all columns per design",
+        "Creates dora_snapshots table with all columns per design",
+        "Creates archetype_history table with all columns per design",
+        "Creates wellbeing_surveys table with all columns per design",
+        "Creates vsi_stage_breakdown table with all columns per design",
+        "All tables use IF NOT EXISTS for idempotency",
+        "All indexes defined"
+      ],
+      "description": "Create the full DORA schema with all 6 tables, columns, types, and indexes"
+    },
+    {
+      "id": "TASK-004",
+      "title": "Implement 02-dora-roles.sql",
+      "agent": "build",
+      "skills": ["build", "governance-enforcement"],
+      "estimated_lines": 40,
+      "dependencies": ["TASK-003"],
+      "acceptance_criteria": [
+        "Creates dora_app role (not superuser)",
+        "Grants INSERT on event_queue",
+        "Grants SELECT, INSERT on raw_events",
+        "Grants SELECT, INSERT on dora_snapshots",
+        "Grants SELECT on archetype_history, wellbeing_surveys, vsi_stage_breakdown",
+        "NO schema ownership granted",
+        "Idempotent using DO $$ blocks"
+      ],
+      "description": "Create the least-privilege dora_app role with granular table-level grants"
+    },
+    {
+      "id": "TASK-005",
+      "title": "Implement hypertables.sql",
+      "agent": "build",
+      "skills": ["build"],
+      "estimated_lines": 30,
+      "dependencies": ["TASK-003"],
+      "acceptance_criteria": [
+        "Converts raw_events to hypertable partitioned by recorded_at (1-day chunks)",
+        "Converts dora_snapshots to hypertable partitioned by recorded_at (7-day chunks)",
+        "Converts vsi_stage_breakdown to hypertable partitioned by recorded_at (1-day chunks)",
+        "Skips conversion if already a hypertable (idempotent)"
+      ],
+      "description": "Convert time-series tables to TimescaleDB hypertables with time-based partitioning"
+    },
+    {
+      "id": "TASK-006",
+      "title": "Implement 001-initial-schema.sql migration",
+      "agent": "build",
+      "skills": ["build"],
+      "estimated_lines": 30,
+      "dependencies": ["TASK-002", "TASK-003", "TASK-004", "TASK-005"],
+      "acceptance_criteria": [
+        "Creates _schema_migrations tracking table",
+        "Contains the full initial schema matching all init scripts combined",
+        "First run recorded as migration 001",
+        "Forward-only (no rollback)"
+      ],
+      "description": "Create the initial forward-only migration that matches all init scripts"
+    },
+    {
+      "id": "TASK-007",
+      "title": "Create docker-compose.dev.yml",
+      "agent": "build",
+      "skills": ["build", "dev-experience"],
+      "estimated_lines": 35,
+      "dependencies": ["TASK-002", "TASK-003", "TASK-004", "TASK-005"],
+      "acceptance_criteria": [
+        "Uses timescale/timescaledb:latest-pg16 image",
+        "Mounts database/init/ to /docker-entrypoint-initdb.d/",
+        "Mounts database/timescaledb/ scripts",
+        "Exposes port 5432",
+        "Named volume for data persistence",
+        "Uses .env file for credentials (gitignored)"
+      ],
+      "description": "Create a standalone docker-compose file for local TimescaleDB development"
+    },
+    {
+      "id": "TASK-008",
+      "title": "Add .gitignore entries for database",
+      "agent": "build",
+      "skills": ["build"],
+      "estimated_lines": 5,
+      "dependencies": ["TASK-007"],
+      "acceptance_criteria": [
+        ".env file in .gitignore",
+        "pgdata volume directory (if any) in .gitignore"
+      ],
+      "description": "Ensure .env and local database files are gitignored"
+    },
+    {
+      "id": "TASK-009",
+      "title": "Implement test_schema.py with testcontainers",
+      "agent": "test",
+      "skills": ["test", "test-execution"],
+      "estimated_lines": 100,
+      "dependencies": ["TASK-002", "TASK-003", "TASK-004", "TASK-005"],
+      "acceptance_criteria": [
+        "Spins up test Postgres container using testcontainers with timescale/timescaledb:latest-pg16",
+        "Applies all init scripts in order (00, 01, 02, hypertables)",
+        "Verifies all 6 tables exist",
+        "Verifies 3 hypertables are properly created",
+        "Verifies dora_app role exists and is not superuser",
+        "Verifies role permissions are correct (INSERT/SELECT per table)",
+        "Cleans up container after test run"
+      ],
+      "description": "Integration test that validates the full schema against a real TimescaleDB container"
+    },
+    {
+      "id": "TASK-010",
+      "title": "Update Makefile with docker-compose targets",
+      "agent": "build",
+      "skills": ["build"],
+      "estimated_lines": 15,
+      "dependencies": ["TASK-007"],
+      "acceptance_criteria": [
+        "Adds `make db-up` target to start TimescaleDB",
+        "Adds `make db-down` target to stop TimescaleDB",
+        "Adds `make db-reset` target to recreate database (down + up)"
+      ],
+      "description": "Add convenient Makefile targets for local database management"
+    }
+  ],
+  "dependency_graph": {
+    "nodes": [
+      "TASK-001",
+      "TASK-002",
+      "TASK-003",
+      "TASK-004",
+      "TASK-005",
+      "TASK-006",
+      "TASK-007",
+      "TASK-008",
+      "TASK-009",
+      "TASK-010"
+    ],
+    "edges": [
+      ["TASK-001", "TASK-002"],
+      ["TASK-001", "TASK-003"],
+      ["TASK-001", "TASK-005"],
+      ["TASK-003", "TASK-004"],
+      ["TASK-003", "TASK-005"],
+      ["TASK-002", "TASK-006"],
+      ["TASK-003", "TASK-006"],
+      ["TASK-004", "TASK-006"],
+      ["TASK-005", "TASK-006"],
+      ["TASK-002", "TASK-007"],
+      ["TASK-003", "TASK-007"],
+      ["TASK-004", "TASK-007"],
+      ["TASK-005", "TASK-007"],
+      ["TASK-007", "TASK-008"],
+      ["TASK-002", "TASK-009"],
+      ["TASK-003", "TASK-009"],
+      ["TASK-004", "TASK-009"],
+      ["TASK-005", "TASK-009"],
+      ["TASK-007", "TASK-010"]
+    ]
+  },
+  "summary": {
+    "total_tasks": 10,
+    "total_estimated_lines": 420,
+    "critical_path": [
+      "TASK-001",
+      "TASK-003",
+      "TASK-005",
+      "TASK-006",
+      "TASK-009"
+    ]
+  }
+}
