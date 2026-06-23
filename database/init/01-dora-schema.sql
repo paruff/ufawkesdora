@@ -54,13 +54,19 @@ CREATE INDEX IF NOT EXISTS idx_raw_events_type_outcome
 -- dora_snapshots — periodic DORA metric snapshots (will become hypertable)
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS dora_snapshots (
-    id              BIGSERIAL       NOT NULL,
+    id                      BIGSERIAL       NOT NULL,
     team_id                 VARCHAR(64)     NOT NULL,
     deployment_frequency    NUMERIC(10,4)   NOT NULL,
     lead_time_hours         NUMERIC(10,2),
     change_failure_rate     NUMERIC(5,4)
                             CHECK (change_failure_rate >= 0 AND change_failure_rate <= 1),
     time_to_restore_hours   NUMERIC(10,2),
+    fdrt_hours              NUMERIC(10,2),
+    rework_rate_pct         NUMERIC(5,4)
+                            CHECK (rework_rate_pct >= 0 AND rework_rate_pct <= 1),
+    proxy_metrics           BOOLEAN         NOT NULL DEFAULT FALSE,
+    dora_tier               VARCHAR(16)
+                            CHECK (dora_tier IN ('elite', 'high', 'medium', 'low', 'unknown')),
     snapshot_window_start   TIMESTAMPTZ     NOT NULL,
     snapshot_window_end     TIMESTAMPTZ     NOT NULL,
     recorded_at             TIMESTAMPTZ     NOT NULL DEFAULT NOW(),

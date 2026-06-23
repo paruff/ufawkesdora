@@ -1,4 +1,4 @@
-.PHONY: help test test-unit validate pre-commit-setup pre-commit-run clean
+.PHONY: help test test-unit test-integration test-all validate pre-commit-setup pre-commit-run clean
 
 help: ## Show this help message
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -7,14 +7,23 @@ help: ## Show this help message
 # Test Commands
 # ============================================================================
 
+# Use .venv/bin/pytest if available, fall back to system pytest.
+# The .venv avoids the pytest-bdd compatibility issue on macOS system Python.
+PYTEST = $(shell [ -f .venv/bin/pytest ] && echo ".venv/bin/pytest" || echo "pytest")
+
 test: test-unit ## Run all tests
 	@echo "All tests passed"
 
 test-unit: ## Run unit tests
-	DOCKER_HOST="unix:///Users/philruff/.docker/run/docker.sock" pytest tests/unit/ -v --tb=short
+	DOCKER_HOST="unix:///Users/philruff/.docker/run/docker.sock" $(PYTEST) tests/unit/ -v --tb=short
 
 test-coverage: ## Run tests with coverage report
-	DOCKER_HOST="unix:///Users/philruff/.docker/run/docker.sock" pytest tests/unit/ -v --tb=short --cov=tests/unit --cov-report=term-missing
+	DOCKER_HOST="unix:///Users/philruff/.docker/run/docker.sock" $(PYTEST) tests/unit/ -v --tb=short --cov=compute --cov=ingestion --cov-report=term-missing
+
+test-integration: ## Run integration tests (requires Docker)
+	DOCKER_HOST="unix:///Users/philruff/.docker/run/docker.sock" $(PYTEST) tests/integration/ -v --tb=short -W error::RuntimeWarning
+
+test-all: test-unit test-integration ## Run all tests (unit + integration)
 
 # ============================================================================
 # Validation Commands

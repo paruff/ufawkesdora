@@ -9,3 +9,4 @@ fastapi>=0.110
 asyncpg>=0.30
 uvicorn>=0.29
 httpx>=0.27
+aiohttp>=3.14
