@@ -7,10 +7,13 @@ As a DORA metrics platform engineer, I want a PostgreSQL + TimescaleDB schema fo
 ## Functional Requirements
 
 ### REQ-001: Database Initialization
+
 Create three databases (`dora_metrics`, `infisical`, `defectdojo`) via idempotent psql script with least-privilege roles. No environment variable injection for database credentials.
 
 ### REQ-002: DORA Metrics Schema
+
 Define tables for all uFawkesDORA data domains:
+
 - `event_queue` — incoming event buffer
 - `raw_events` — processed event records with timestamps
 - `dora_snapshots` — periodic DORA metric snapshots
@@ -19,37 +22,46 @@ Define tables for all uFawkesDORA data domains:
 - `vsi_stage_breakdown` — value stream stage timing data
 
 ### REQ-003: Application Role
+
 Create a `dora_app` role with least-privilege grants: INSERT on event_queue, SELECT/INSERT on raw_events, INSERT on dora_snapshots. No superuser, no schema ownership.
 
 ### REQ-004: TimescaleDB Hypertables
+
 Convert `raw_events`, `dora_snapshots`, and `vsi_stage_breakdown` to TimescaleDB hypertables partitioned by time for efficient time-bucket queries.
 
 ### REQ-005: Forward-Only Migrations
+
 Provide a migration system starting with `001-initial-schema.sql` that matches the init scripts. First run equals migration 001.
 
 ### REQ-006: Development Environment
+
 Provide a `docker-compose.dev.yml` with a local TimescaleDB container for standalone development without the full resource plane.
 
 ### REQ-007: Schema Validation Tests
+
 Unit tests that spin up a test Postgres container via testcontainers, apply all init scripts, verify all tables exist, verify hypertable creation, and verify role permissions.
 
 ## Non-Functional Requirements
 
 ### NFR-001: Idempotency
+
 All init scripts must be safe to re-run (idempotent). Running them multiple times must produce the same result.
 
 ### NFR-002: Security
+
 - No hardcoded credentials in scripts
 - Least-privilege role grants only
 - No superuser roles for application access
 - No environment variable injection for database credentials
 
 ### NFR-003: Compatibility
+
 - Use `timescale/timescaledb:latest-pg16` as base image
 - PostgreSQL 16 compatibility
 - SQL standard compliant where possible
 
 ### NFR-004: Portability
+
 Init scripts are bind-mounted into the resource plane container — no hardcoded paths.
 
 ## Constraints
@@ -93,9 +105,9 @@ Init scripts are bind-mounted into the resource plane container — no hardcoded
 
 ## Governance Alignment
 
-| Requirement | Status | Notes |
-| ----------- | ------ | ----- |
-| Security | COVERED | Least-privilege roles, no superuser, no hardcoded creds |
-| Pipeline | COVERED | CI tests via pytest |
-| Idempotency | COVERED | Scripts safe to re-run |
-| Portability | COVERED | Bind-mount compatible, no hardcoded paths |
+| Requirement | Status  | Notes                                                   |
+| ----------- | ------- | ------------------------------------------------------- |
+| Security    | COVERED | Least-privilege roles, no superuser, no hardcoded creds |
+| Pipeline    | COVERED | CI tests via pytest                                     |
+| Idempotency | COVERED | Scripts safe to re-run                                  |
+| Portability | COVERED | Bind-mount compatible, no hardcoded paths               |

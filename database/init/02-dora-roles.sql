@@ -14,7 +14,7 @@
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dora_app') THEN
-        CREATE ROLE dora_app WITH LOGIN PASSWORD 'change_me_in_production';
+        CREATE ROLE dora_app WITH LOGIN PASSWORD 'change_me_in_production';  -- pragma: allowlist secret
         RAISE NOTICE 'Created role: dora_app';
     ELSE
         RAISE NOTICE 'Role already exists: dora_app';

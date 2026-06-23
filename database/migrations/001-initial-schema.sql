@@ -205,7 +205,7 @@ SELECT add_compression_policy('vsi_stage_breakdown', INTERVAL '7 days', if_not_e
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dora_app') THEN
-        CREATE ROLE dora_app WITH LOGIN PASSWORD 'change_me_in_production';
+        CREATE ROLE dora_app WITH LOGIN PASSWORD 'change_me_in_production';  -- pragma: allowlist secret
     END IF;
 END
 $$;

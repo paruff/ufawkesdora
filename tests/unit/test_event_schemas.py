@@ -146,7 +146,7 @@ class TestDeploymentEvent:
             "repo": "my-org/my-service",
             "service": "api-gateway",
             "environment": "production",
-            "commit_sha": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+            "commit_sha": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",  # pragma: allowlist secret
             "deployed_at": "2026-06-22T10:30:00Z",
             "status": "success",
             "pipeline_url": "https://github.com/my-org/my-service/actions/runs/12345"
@@ -238,7 +238,7 @@ class TestIncidentEvent:
 
     def test_optional_fields_accepted(self, incident_schema, valid_payload):
         payload = dict(valid_payload,
-                       linked_deployment_sha="a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+                       linked_deployment_sha="a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",  # pragma: allowlist secret
                        severity="SEV1")
         validate(payload, incident_schema)
 
@@ -261,7 +261,7 @@ class TestPREvent:
             "event_type": "pr",
             "repo": "my-org/my-service",
             "pr_number": 42,
-            "commit_sha": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+            "commit_sha": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",  # pragma: allowlist secret
             "status": "merged",
             "occurred_at": "2026-06-22T10:30:00Z",
             "first_commit_at": "2026-06-20T08:00:00Z"
@@ -320,7 +320,7 @@ class TestReworkEvent:
             "schema_version": "1.0",
             "event_type": "rework",
             "repo": "my-org/my-service",
-            "deployment_sha": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+            "deployment_sha": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",  # pragma: allowlist secret
             "rework_type": "hotfix",
             "triggered_at": "2026-06-22T10:30:00Z",
             "user_visible": True
@@ -379,7 +379,7 @@ class TestCrossSchema:
             "repo": "org/repo",
             "service": "svc",
             "environment": "prod",
-            "commit_sha": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+            "commit_sha": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",  # pragma: allowlist secret
             "deployed_at": "2026-06-22T10:30:00Z",
             "status": "success",
             "pipeline_url": "https://example.com/pipeline/1"
@@ -408,7 +408,7 @@ class TestCrossSchema:
             "event_type": "pr",
             "repo": "org/repo",
             "pr_number": 1,
-            "commit_sha": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+            "commit_sha": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",  # pragma: allowlist secret
             "status": "opened",
             "occurred_at": "2026-06-22T10:30:00Z",
             "first_commit_at": "2026-06-20T08:00:00Z"
