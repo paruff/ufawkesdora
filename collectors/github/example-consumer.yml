@@ -1,0 +1,60 @@
+# ============================================================================
+# uFawkesDORA — Example Consumer Workflow
+# ============================================================================
+#
+# Complete example showing how any repo in the fawkes suite wires the
+# uFawkesDORA GitHub collectors into its CI/CD pipeline.
+#
+# To use in your repo:
+#   1. Copy this file to .github/workflows/dora-events.yml
+#   2. Set DORA_INGESTION_URL as a repository variable
+#   3. Customize the deployment status trigger
+#
+# Required:
+#   vars.DORA_INGESTION_URL — e.g. https://dora-ingestion.ufawkes.dev
+# ============================================================================
+
+name: Emit DORA Events
+
+on:
+  # ── Trigger on releases (deployment events) ─────────────────────────────
+  release:
+    types: [published]
+
+  # ── Trigger on PR merges (PR events) ─────────────────────────────────────
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  pull-requests: read # Required by dora-pr-event.yml to fetch PR commits
+
+jobs:
+  # ─── Deployment Event ────────────────────────────────────────────────────
+  emit-deployment:
+    if: github.event_name == 'release'
+    name: Emit Deployment Event
+    runs-on: ubuntu-latest
+    steps:
+      - name: Emit deployment to uFawkesDORA
+        uses: paruff/ufawkesdora/collectors/github/dora-deployment-event.yml@v1
+        with:
+          status: success
+          environment: production
+          pipeline_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # Optional:
+          # ai_assisted: true
+          # deploy_duration_seconds: 120
+
+  # ─── PR Event ────────────────────────────────────────────────────────────
+  emit-pr:
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true
+    name: Emit PR Event
+    runs-on: ubuntu-latest
+    steps:
+      - name: Emit PR event to uFawkesDORA
+        uses: paruff/ufawkesdora/collectors/github/dora-pr-event.yml@v1
+        with:
+          pr_number: ${{ github.event.pull_request.number }}
+          # Optional:
+          # ai_assisted: true

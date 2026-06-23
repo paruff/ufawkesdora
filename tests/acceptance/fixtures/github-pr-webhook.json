@@ -1,0 +1,52 @@
+{
+  "description": "Simulated GitHub pull_request webhook payload (closed/merged). The dora-pr-event collector fetches PR commits via the GitHub API to determine first_commit_at, then constructs a canonical PR event.",
+  "event": {
+    "action": "closed",
+    "pull_request": {
+      "number": 128,
+      "title": "feat: Add deployment frequency dashboard",
+      "merge_commit_sha": "b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1",
+      "merged_at": "2026-06-23T14:30:00Z",
+      "head": {
+        "sha": "c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2"
+      }
+    },
+    "repository": {
+      "full_name": "paruff/uFawkesObs",
+      "name": "uFawkesObs"
+    }
+  },
+  "simulated_api_response": {
+    "commits": [
+      {
+        "sha": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+        "commit": {
+          "committer": { "date": "2026-06-20T08:00:00Z" }
+        }
+      },
+      {
+        "sha": "b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1",
+        "commit": {
+          "committer": { "date": "2026-06-21T10:30:00Z" }
+        }
+      },
+      {
+        "sha": "c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2",
+        "commit": {
+          "committer": { "date": "2026-06-23T12:00:00Z" }
+        }
+      }
+    ]
+  },
+  "expected_canonical_event": {
+    "schema_version": "1.0",
+    "event_type": "pr",
+    "repo": "paruff/uFawkesObs",
+    "pr_number": 128,
+    "commit_sha": "b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1",
+    "status": "merged",
+    "occurred_at": "2026-06-23T14:30:00Z",
+    "first_commit_at": "2026-06-20T08:00:00Z",
+    "ai_assisted": false
+  }
+}
