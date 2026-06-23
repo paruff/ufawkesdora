@@ -21,6 +21,8 @@ jobs:
   preflight:
     name: Pre-flight
     uses: ./.github/workflows/reusable-preflight.yml
+    with:
+      pr-size-limit: 0
 
   # ─── Stage 1: Static Analysis (Lint) ────────────────────────────────────
   lint:
@@ -54,9 +56,6 @@ jobs:
     needs: [security, dependency-review]
     uses: ./.github/workflows/reusable-build.yml
     with:
-      validate-docker-compose: false
-      validate-jcasc: false
-      validate-k8s: false
       fail-on-latest: true
 
   # ─── Stage 4: Tests ────────────────────────────────────────────────────
