@@ -212,7 +212,7 @@ $$;
 
 ALTER ROLE dora_app WITH NOSUPERUSER NOCREATEDB NOCREATEROLE;
 GRANT USAGE ON SCHEMA public TO dora_app;
-GRANT INSERT ON TABLE event_queue TO dora_app;
+GRANT SELECT, INSERT, UPDATE ON TABLE event_queue TO dora_app;
 GRANT SELECT, INSERT ON TABLE raw_events TO dora_app;
 GRANT SELECT, INSERT ON TABLE dora_snapshots TO dora_app;
 GRANT SELECT ON TABLE archetype_history TO dora_app;

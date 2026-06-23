@@ -104,7 +104,7 @@ esac
 
 # ── Build payload ───────────────────────────────────────────────────────────
 
-RESOLVED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+OCCURRED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 PAYLOAD=$(cat <<EOF
 {
@@ -114,7 +114,7 @@ PAYLOAD=$(cat <<EOF
   "service": "${SERVICE}",
   "incident_id": "${INCIDENT_ID}",
   "status": "resolved",
-  "resolved_at": "${RESOLVED_AT}",
+  "occurred_at": "${OCCURRED_AT}",
   "severity": "${SEVERITY}"
 }
 EOF
@@ -133,7 +133,7 @@ HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
 if [ "${HTTP_STATUS}" = "201" ]; then
     echo "[dora] ✅ Incident ${INCIDENT_ID} resolved successfully"
     echo "[dora]    Service: ${SERVICE}"
-    echo "[dora]    Resolved at: ${RESOLVED_AT}"
+    echo "[dora]    Occurred at: ${OCCURRED_AT}"
     echo "[dora]    API: ${INGESTION_URL}/event"
     exit 0
 else

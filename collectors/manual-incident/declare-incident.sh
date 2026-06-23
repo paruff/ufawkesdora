@@ -32,7 +32,7 @@ API_KEY="${DORA_API_KEY:-}"
 INCIDENT_ID=""
 SERVICE=""
 SEVERITY=""
-REPORTED_AT=""
+OCCURRED_AT=""
 
 # ── Flag parsing ────────────────────────────────────────────────────────────
 
@@ -107,7 +107,7 @@ esac
 
 # ── Build payload ───────────────────────────────────────────────────────────
 
-REPORTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+OCCURRED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 PAYLOAD=$(cat <<EOF
 {
@@ -117,7 +117,7 @@ PAYLOAD=$(cat <<EOF
   "service": "${SERVICE}",
   "incident_id": "${INCIDENT_ID}",
   "status": "opened",
-  "reported_at": "${REPORTED_AT}",
+  "occurred_at": "${OCCURRED_AT}",
   "severity": "${SEVERITY}"
 }
 EOF
@@ -137,7 +137,7 @@ if [ "${HTTP_STATUS}" = "201" ]; then
     echo "[dora] ✅ Incident ${INCIDENT_ID} declared successfully"
     echo "[dora]    Service: ${SERVICE}"
     echo "[dora]    Severity: ${SEVERITY}"
-    echo "[dora]    Reported at: ${REPORTED_AT}"
+    echo "[dora]    Occurred at: ${OCCURRED_AT}"
     echo "[dora]    API: ${INGESTION_URL}/event"
     exit 0
 else

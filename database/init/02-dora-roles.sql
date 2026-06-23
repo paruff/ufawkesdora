@@ -36,8 +36,8 @@ GRANT USAGE ON SCHEMA public TO dora_app;
 -- Table-level grants (least privilege)
 -- ============================================================================
 
--- event_queue: only INSERT (event producers write, consumers read via app)
-GRANT INSERT ON TABLE event_queue TO dora_app;
+-- event_queue: SELECT (health check + dequeue), INSERT (enqueue), UPDATE (worker dequeue/mark done)
+GRANT SELECT, INSERT, UPDATE ON TABLE event_queue TO dora_app;
 
 -- raw_events: SELECT (read for computation) + INSERT (write processed events)
 GRANT SELECT, INSERT ON TABLE raw_events TO dora_app;
