@@ -230,7 +230,7 @@ def _bootstrap_databases_and_roles(cursor):
             DO $$
             BEGIN
                 IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{role}') THEN
-                    CREATE ROLE "{role}" WITH LOGIN PASSWORD 'change_me_in_production';
+                    CREATE ROLE "{role}" WITH LOGIN PASSWORD 'change_me_in_production';  -- pragma: allowlist secret
                     RAISE NOTICE 'Created role: {role}';
                 ELSE
                     RAISE NOTICE 'Role already exists: {role}';

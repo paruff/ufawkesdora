@@ -39,7 +39,7 @@ create_role_if_not_exists() {
         DO \$\$
         BEGIN
             IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${role_name}') THEN
-                CREATE ROLE "${role_name}" WITH LOGIN PASSWORD 'change_me_in_production';
+                CREATE ROLE "${role_name}" WITH LOGIN PASSWORD 'change_me_in_production';  -- pragma: allowlist secret
                 RAISE NOTICE 'Created role: ${role_name}';
             ELSE
                 RAISE NOTICE 'Role already exists: ${role_name}';

@@ -164,7 +164,18 @@
     }
   ],
   "dependency_graph": {
-    "nodes": ["TASK-001", "TASK-002", "TASK-003", "TASK-004", "TASK-005", "TASK-006", "TASK-007", "TASK-008", "TASK-009", "TASK-010"],
+    "nodes": [
+      "TASK-001",
+      "TASK-002",
+      "TASK-003",
+      "TASK-004",
+      "TASK-005",
+      "TASK-006",
+      "TASK-007",
+      "TASK-008",
+      "TASK-009",
+      "TASK-010"
+    ],
     "edges": [
       ["TASK-001", "TASK-002"],
       ["TASK-001", "TASK-003"],
@@ -190,6 +201,12 @@
   "summary": {
     "total_tasks": 10,
     "total_estimated_lines": 420,
-    "critical_path": ["TASK-001", "TASK-003", "TASK-005", "TASK-006", "TASK-009"]
+    "critical_path": [
+      "TASK-001",
+      "TASK-003",
+      "TASK-005",
+      "TASK-006",
+      "TASK-009"
+    ]
   }
 }
