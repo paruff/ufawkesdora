@@ -332,8 +332,8 @@ class TestSchema:
 
     # ── Permission verification ───────────────────────────────────────────
 
-    def test_dora_app_event_queue_insert_only(self, db_cursor):
-        """Verify dora_app has INSERT only on event_queue."""
+    def test_dora_app_event_queue_grants(self, db_cursor):
+        """Verify dora_app has SELECT, INSERT, UPDATE on event_queue."""
         db_cursor.execute("""
             SELECT privilege_type
             FROM information_schema.table_privileges
@@ -343,8 +343,8 @@ class TestSchema:
             ORDER BY privilege_type
         """)
         grants = [row[0] for row in db_cursor.fetchall()]
-        assert grants == ["INSERT"], \
-            f"Expected only INSERT on event_queue, got: {grants}"
+        assert grants == ["INSERT", "SELECT", "UPDATE"], \
+            f"Expected SELECT, INSERT, UPDATE on event_queue, got: {grants}"
 
     def test_dora_app_raw_events_select_insert(self, db_cursor):
         """Verify dora_app has SELECT and INSERT on raw_events."""
