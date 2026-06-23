@@ -191,6 +191,7 @@ Index: `(deployment_id, stage_name)` for deployment breakdown queries.
 
 ### SQL API — Init Scripts
 
+<<<<<<< HEAD
 The init scripts expose no network interfaces. They are consumed by:
 
 - **psql** during container initialization (`docker-entrypoint-initdb.d/`)
@@ -235,3 +236,13 @@ The `dora_app` role has access to:
 | Portability | All paths relative, bind-mount compatible                             | COVERED |
 | Testability | Full schema tested via testcontainers with real Postgres              | COVERED |
 | CI          | pytest runs on all pushes                                             | COVERED |
+
+## Tradeoff Decisions
+
+| Decision                             | Rationale                                                                          | Alternatives Considered                                                          |
+| ------------------------------------ | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| POSIX sh (not bash)                  | Maximum portability across containers, CI runners, and developer machines          | Bash — rejected because many minimal CI images lack bash                         |
+| Interactive prompts in scripts       | Makes the script usable without reference docs; useful in incident stress          | Flags-only — rejected because reading docs under pressure is failure-prone       |
+| curl with `\|\|` true in CI snippets | Prevents a DORA event collector from failing the pipeline                          | Hard fail — rejected; the pipeline should not fail because observability is down |
+| Woodpecker `from_secret`             | Follows Woodpecker's security best practices                                       | Environment variables in pipeline config — less secure                           |
+| Scripts exit code 1 on failure       | Manual scripts need the user to know it failed (unlike CI where it's non-critical) | Silent failure — dangerous; user would think FDRT is being tracked when it's not |

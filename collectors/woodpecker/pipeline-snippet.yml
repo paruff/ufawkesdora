@@ -1,0 +1,59 @@
+# ============================================================================
+# Woodpecker CI Pipeline Snippet — uFawkesDORA Deployment Event
+# ----------------------------------------------------------------------------
+# Include this step in your Woodpecker pipeline to emit a deployment event
+# to the uFawkesDORA ingestion API on pipeline success or failure.
+#
+# Usage:
+#   1. Add secrets in your Woodpecker repo settings:
+#      - dora_ingestion_url  (e.g. https://dora.example.com)
+#      - dora_api_key        (optional, if auth is enabled)
+#   2. Copy this snippet into your .woodpecker/*.yml
+#   3. The step runs on every push/tag/deployment automatically
+#
+# Reference: https://woodpecker-ci.org/docs/usage/secrets
+# ============================================================================
+
+steps:
+  notify-dora:
+    image: curlimages/curl:latest
+    pull: true
+    commands:
+      # Build JSON payload from Woodpecker CI environment variables.
+      # Uses a heredoc to avoid shell quoting issues in the JSON body.
+      - |
+        PAYLOAD=$(cat <<EOF
+        {
+          "schema_version": "1.0",
+          "event_type": "deployment",
+          "repo": "${CI_REPO}",
+          "service": "${CI_REPO_NAME}",
+          "environment": "production",
+          "commit_sha": "${CI_COMMIT_SHA}",
+          "deployed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "status": "${CI_PIPELINE_STATUS}",
+          "pipeline_url": "${CI_PIPELINE_URL}",
+          "source": "woodpecker"
+        }
+        EOF
+        )
+      - |
+        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+          -X POST "${DORA_INGESTION_URL}/event" \
+          -H "Content-Type: application/json" \
+          ${DORA_API_KEY:+-H "Authorization: Bearer ${DORA_API_KEY}"} \
+          -d "${PAYLOAD}")
+      - |
+        if [ "${HTTP_STATUS}" != "201" ]; then
+          echo "[dora] WARNING: deployment event returned ${HTTP_STATUS} (expected 201)" >&2
+        else
+          echo "[dora] deployment event accepted (${HTTP_STATUS})"
+        fi
+    environment:
+      DORA_INGESTION_URL:
+        from_secret: dora_ingestion_url # pragma: allowlist secret
+      DORA_API_KEY:
+        from_secret: dora_api_key # pragma: allowlist secret
+    when:
+      - event: [push, tag, deployment]
+        status: [success, failure]
