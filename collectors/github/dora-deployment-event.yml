@@ -1,0 +1,141 @@
+# ============================================================================
+# uFawkesDORA — Deployment Event Collector (GitHub Actions)
+# ============================================================================
+#
+# Reusable workflow that emits a deployment event to the uFawkesDORA
+# ingestion API. Any repo in the fawkes suite can call this from its
+# release/deploy workflow to start tracking Deployment Frequency, Lead
+# Time, Change Failure Rate, and FDRT.
+#
+# Usage:
+#   jobs:
+#     emit-deployment:
+#       uses: paruff/ufawkesdora/.github/workflows/dora-deployment-event.yml@v1
+#       with:
+#         status: success
+#         environment: production
+#         pipeline_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+#       secrets: inherit
+#
+# Required vars:
+#   DORA_INGESTION_URL  — URL of the uFawkesDORA ingestion API
+#                         (e.g. https://dora-ingestion.ufawkes.dev)
+#
+# Schema: deployment-event.schema.json (Draft-07)
+# ============================================================================
+
+name: "uFawkesDORA: Emit Deployment Event"
+
+on:
+  workflow_call:
+    inputs:
+      status:
+        description: "Deployment outcome: success, failed, or rollback"
+        required: true
+        type: string
+      environment:
+        description: "Target environment (e.g. production, staging, dev)"
+        required: true
+        type: string
+      pipeline_url:
+        description: "Link to the CI/CD pipeline run that performed the deployment"
+        required: true
+        type: string
+      service:
+        description: "Service or component name (defaults to repository name)"
+        required: false
+        type: string
+      deploy_duration_seconds:
+        description: "Total wall-clock time the deployment took, in seconds"
+        required: false
+        type: number
+      ai_assisted:
+        description: "Whether AI tooling was involved in the deployment process"
+        required: false
+        type: boolean
+        default: false
+      ingestion_url:
+        description: "Override DORA_INGESTION_URL (for testing/dev)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  emit-deployment:
+    name: Emit Deployment Event
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: DORA job start
+        run: |
+          echo "job-start:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "workflow:collectors/github/dora-deployment-event.yml"
+
+      - name: Build and send deployment event
+        env:
+          INGESTION_URL: ${{ inputs.ingestion_url || vars.DORA_INGESTION_URL }}
+          REPO: ${{ github.repository }}
+          SERVICE: ${{ inputs.service || github.event.repository.name || github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+          DEPLOYED_AT: ${{ github.event.head_commit.timestamp }}
+        run: |
+          set -euo pipefail
+
+          # Validate required inputs
+          if [ -z "$INGESTION_URL" ]; then
+            echo "::error::DORA_INGESTION_URL is required. Set as a repository variable or pass ingestion_url input."
+            exit 1
+          fi
+
+          # Use current UTC timestamp if head_commit timestamp not available
+          if [ -z "$DEPLOYED_AT" ]; then
+            DEPLOYED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          fi
+
+          # Build the canonical deployment event payload
+          PAYLOAD=$(cat <<EOF
+          {
+            "schema_version": "1.0",
+            "event_type": "deployment",
+            "repo": "${REPO}",
+            "service": "${SERVICE}",
+            "environment": "${{ inputs.environment }}",
+            "commit_sha": "${COMMIT_SHA}",
+            "deployed_at": "${DEPLOYED_AT}",
+            "status": "${{ inputs.status }}",
+            "pipeline_url": "${{ inputs.pipeline_url }}",
+            "ai_assisted": ${{ inputs.ai_assisted }}
+          }
+          EOF
+          )
+
+          # Add optional deploy_duration_seconds if provided
+          if [ -n "${{ inputs.deploy_duration_seconds }}" ]; then
+            PAYLOAD=$(echo "$PAYLOAD" | jq \
+              --argjson dur "${{ inputs.deploy_duration_seconds }}" \
+              '.deploy_duration_seconds = $dur')
+          fi
+
+          # POST to the ingestion API
+          echo "Sending deployment event to ${INGESTION_URL}/event ..."
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "${INGESTION_URL}/event" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+
+          if [ "$HTTP_STATUS" = "201" ]; then
+            echo "✅ Deployment event accepted (HTTP 201)"
+          elif [ "$HTTP_STATUS" = "422" ]; then
+            echo "::warning::Deployment event rejected by ingestion API (HTTP 422)"
+            echo "Payload:"
+            echo "$PAYLOAD" | jq .
+          else
+            echo "::warning::Deployment event returned HTTP ${HTTP_STATUS}"
+          fi
+
+      - name: DORA job finish
+        if: always()
+        run: echo "job-finish:$(date -u +%Y-%m-%dT%H:%M:%SZ)"

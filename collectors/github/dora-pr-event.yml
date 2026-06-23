@@ -1,0 +1,201 @@
+# ============================================================================
+# uFawkesDORA — Pull Request Event Collector (GitHub Actions)
+# ============================================================================
+#
+# Reusable workflow that emits a pull request event to the uFawkesDORA
+# ingestion API. Designed to be called when a PR is merged — the workflow
+# fetches PR details (including first_commit_at via the GitHub API) and
+# sends a canonical pr-event to the ingestion API.
+#
+# Usage:
+#   on:
+#     pull_request:
+#       types: [closed]
+#
+#   jobs:
+#     emit-pr:
+#       if: github.event.pull_request.merged == true
+#       uses: paruff/ufawkesdora/collectors/github/dora-pr-event.yml@v1
+#       with:
+#         pr_number: ${{ github.event.pull_request.number }}
+#       secrets: inherit
+#
+# Required vars:
+#   DORA_INGESTION_URL  — URL of the uFawkesDORA ingestion API
+#
+# Required permissions:
+#   pull-requests: read  (to fetch PR commits timeline)
+#   contents: read
+#
+# Schema: pr-event.schema.json (Draft-07)
+# ============================================================================
+
+name: "uFawkesDORA: Emit PR Event"
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        description: "Pull request number"
+        required: true
+        type: number
+      status:
+        description: "PR lifecycle status (opened, merged, closed)"
+        required: false
+        type: string
+        default: "merged"
+      commit_sha:
+        description: "Override merge commit SHA (fetched from API if omitted)"
+        required: false
+        type: string
+      ai_assisted:
+        description: "Whether AI tooling was used in generating or reviewing the PR"
+        required: false
+        type: boolean
+        default: false
+      ingestion_url:
+        description: "Override DORA_INGESTION_URL (for testing/dev)"
+        required: false
+        type: string
+      repo:
+        description: "Repository identifier (defaults to github.repository)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  emit-pr-event:
+    name: Emit PR Event
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: DORA job start
+        run: |
+          echo "job-start:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "workflow:collectors/github/dora-pr-event.yml"
+          echo "pr-number:${{ inputs.pr_number }}"
+
+      - name: Fetch PR details and compute first_commit_at
+        id: pr-details
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER_REPO: ${{ inputs.repo || github.repository }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          set -euo pipefail
+
+          echo "Fetching PR #${PR_NUMBER} details from ${OWNER_REPO} ..."
+
+          # Get PR details (merge_commit_sha, merged_at, title)
+          PR_JSON=$(gh api "repos/${OWNER_REPO}/pulls/${PR_NUMBER}" --jq '{
+            merge_commit_sha,
+            merged_at,
+            title,
+            head: { sha: .head.sha }
+          }')
+
+          MERGE_COMMIT_SHA=$(echo "$PR_JSON" | jq -r '.merge_commit_sha // empty')
+          MERGED_AT=$(echo "$PR_JSON" | jq -r '.merged_at // empty')
+          HEAD_SHA=$(echo "$PR_JSON" | jq -r '.head.sha // empty')
+
+          echo "merge_commit_sha=${MERGE_COMMIT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "merged_at=${MERGED_AT}" >> "$GITHUB_OUTPUT"
+
+          # Fetch all commits in the PR to find the oldest (first_commit_at)
+          echo "Fetching PR commits to determine first_commit_at ..."
+          COMMITS_JSON=$(gh api "repos/${OWNER_REPO}/pulls/${PR_NUMBER}/commits" --paginate --jq '
+            [.[] | { sha: .sha, date: .commit.committer.date }]
+          ')
+
+          # Find the oldest commit by date (earliest = first commit in the branch)
+          FIRST_COMMIT_AT=$(echo "$COMMITS_JSON" | jq -r '
+            sort_by(.date) | .[0].date // empty
+          ')
+
+          if [ -z "$FIRST_COMMIT_AT" ]; then
+            # Fallback: use head commit date
+            FIRST_COMMIT_AT=$(echo "$COMMITS_JSON" | jq -r '
+              .[] | select(.sha == "'"$HEAD_SHA"'") | .date // empty
+            ')
+          fi
+
+          if [ -z "$FIRST_COMMIT_AT" ]; then
+            # Last resort: use current time minus a nominal lead time
+            echo "::warning::Could not determine first_commit_at, using merged_at as fallback"
+            FIRST_COMMIT_AT="$MERGED_AT"
+          fi
+
+          echo "first_commit_at=${FIRST_COMMIT_AT}" >> "$GITHUB_OUTPUT"
+
+          echo "PR #${PR_NUMBER}: merged at ${MERGED_AT}, first commit at ${FIRST_COMMIT_AT}"
+
+      - name: Build and send PR event
+        env:
+          INGESTION_URL: ${{ inputs.ingestion_url || vars.DORA_INGESTION_URL }}
+          REPO: ${{ inputs.repo || github.repository }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          COMMIT_SHA: ${{ inputs.commit_sha || steps.pr-details.outputs.merge_commit_sha }}
+          OCCURRED_AT: ${{ steps.pr-details.outputs.merged_at }}
+          FIRST_COMMIT_AT: ${{ steps.pr-details.outputs.first_commit_at }}
+        run: |
+          set -euo pipefail
+
+          # Validate required inputs
+          if [ -z "$INGESTION_URL" ]; then
+            echo "::error::DORA_INGESTION_URL is required. Set as a repository variable or pass ingestion_url input."
+            exit 1
+          fi
+
+          if [ -z "$COMMIT_SHA" ]; then
+            echo "::error::Could not determine commit_sha for PR #${PR_NUMBER}."
+            exit 1
+          fi
+
+          # Use current timestamp if merged_at not available
+          if [ -z "$OCCURRED_AT" ]; then
+            OCCURRED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          fi
+          if [ -z "$FIRST_COMMIT_AT" ]; then
+            FIRST_COMMIT_AT="$OCCURRED_AT"
+          fi
+
+          # Build the canonical PR event payload
+          PAYLOAD=$(cat <<EOF
+          {
+            "schema_version": "1.0",
+            "event_type": "pr",
+            "repo": "${REPO}",
+            "pr_number": ${PR_NUMBER},
+            "commit_sha": "${COMMIT_SHA}",
+            "status": "${{ inputs.status }}",
+            "occurred_at": "${OCCURRED_AT}",
+            "first_commit_at": "${FIRST_COMMIT_AT}",
+            "ai_assisted": ${{ inputs.ai_assisted }}
+          }
+          EOF
+          )
+
+          # POST to the ingestion API
+          echo "Sending PR event to ${INGESTION_URL}/event ..."
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "${INGESTION_URL}/event" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+
+          if [ "$HTTP_STATUS" = "201" ]; then
+            echo "✅ PR event accepted (HTTP 201)"
+          elif [ "$HTTP_STATUS" = "422" ]; then
+            echo "::warning::PR event rejected by ingestion API (HTTP 422)"
+            echo "Payload:"
+            echo "$PAYLOAD" | jq .
+          else
+            echo "::warning::PR event returned HTTP ${HTTP_STATUS}"
+          fi
+
+      - name: DORA job finish
+        if: always()
+        run: echo "job-finish:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
