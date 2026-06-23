@@ -14,11 +14,11 @@ PYTEST = $(shell [ -f .venv/bin/pytest ] && echo ".venv/bin/pytest" || echo "pyt
 test: test-unit ## Run all tests
 	@echo "All tests passed"
 
-test-unit: ## Run unit tests
-	DOCKER_HOST="unix:///Users/philruff/.docker/run/docker.sock" $(PYTEST) tests/unit/ -v --tb=short
+test-unit: ## Run unit tests (fast, no Docker)
+	$(PYTEST) tests/unit/ -v --tb=short
 
-test-coverage: ## Run tests with coverage report
-	DOCKER_HOST="unix:///Users/philruff/.docker/run/docker.sock" $(PYTEST) tests/unit/ -v --tb=short --cov=compute --cov=ingestion --cov-report=term-missing
+test-coverage: ## Run tests with coverage report (unit tests only)
+	$(PYTEST) tests/unit/ -v --tb=short --cov=compute --cov=ingestion --cov-report=term-missing
 
 test-integration: ## Run integration tests (requires Docker)
 	DOCKER_HOST="unix:///Users/philruff/.docker/run/docker.sock" $(PYTEST) tests/integration/ -v --tb=short -W error::RuntimeWarning
