@@ -24,7 +24,7 @@ async def get_pool(dsn: str | None = None, min_size: int = 2, max_size: int = 10
     if _pool is None or _pool.is_closing():
         if dsn is None:
             import os
-            dsn = os.environ.get("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/dora_metrics")
+            dsn = os.environ["DATABASE_URL"]
         _pool = await asyncpg.create_pool(
             dsn,
             min_size=min_size,

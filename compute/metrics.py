@@ -100,10 +100,11 @@ class MetricsDB:
     """Async TimescaleDB connection for metric computation."""
 
     def __init__(self, dsn: str | None = None):
-        self.dsn = dsn or os.environ.get(
-            "DATABASE_URL",
-            "postgresql://dora_app:dora_app@localhost:5432/dora_metrics",  # pragma: allowlist secret
-        )
+        self.dsn = dsn or os.environ.get("DATABASE_URL")
+        if self.dsn is None:
+            raise ValueError(
+                "DATABASE_URL must be set or dsn argument provided"
+            )
         self.pool = None
 
     async def connect(self):
