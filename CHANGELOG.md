@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0] - 2026-06-24
 
 ### Added
+
 - Initial scaffold of the uFawkesDORA metrics platform.
 - Canonical JSON schemas for Draft-07 deployment and incident events.
 - Ingestion API built with FastAPI and asyncpg for stateless, high-throughput event queuing.
