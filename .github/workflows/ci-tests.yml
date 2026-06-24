@@ -36,7 +36,7 @@ jobs:
 
       - name: Install test dependencies
         run: |
-          pip install pytest pytest-cov httpx
+          pip install pytest pytest-cov httpx pyyaml
           if [ -f requirements-ingestion.txt ]; then pip install -r requirements-ingestion.txt; fi
           if [ -f compute/requirements.txt ]; then pip install -r compute/requirements.txt; fi
 
