@@ -83,6 +83,8 @@ class TestWorkflowValidation:
             "aquasecurity/",
             "ludeeus/",
             "golangci/",
+            "DavidAnson/",
+            "lycheeverse/",
         ]
         for f in workflow_files:
             with open(f) as fh:
