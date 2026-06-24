@@ -1,0 +1,71 @@
+# ============================================================================
+# docker-compose.integration.yml
+# ----------------------------------------------------------------------------
+# Isolated integration test stack for Stage 3 Pre-Deployment Validation.
+# Runs a minimal TimescaleDB + uFawkesDORA ingestion API stack for running
+# database schema tests and API contract tests against real services.
+#
+# Usage:
+#   docker compose -f docker-compose.integration.yml up -d
+#   docker compose -f docker-compose.integration.yml exec -T api pytest tests/integration
+#   docker compose -f docker-compose.integration.yml down -v
+# ============================================================================
+
+services:
+  # ─── Integration Test Database (ephemeral) ───────────────────────────────
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: ufawkesdora-int-db
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: integration_test_pass # pragma: allowlist secret
+      POSTGRES_DB: dora_metrics
+      TIMESCALEDB_TELEMETRY: off
+    volumes:
+      - ./database/init/00-create-databases.sh:/docker-entrypoint-initdb.d/00-create-databases.sh:ro
+      - ./database/init/01-dora-schema.sql:/docker-entrypoint-initdb.d/01-dora-schema.sql:ro
+      - ./database/init/02-dora-roles.sql:/docker-entrypoint-initdb.d/02-dora-roles.sql:ro
+      - ./database/timescaledb/hypertables.sql:/docker-entrypoint-initdb.d/03-hypertables.sql:ro
+      - int-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d dora_metrics"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
+  # ─── Ingestion API (FastAPI, stateless) ──────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: ingestion/Dockerfile
+    container_name: ufawkesdora-int-api
+    ports:
+      - "8088:8088"
+    environment:
+      DATABASE_URL: postgresql://dora_app:change_me_in_production@timescaledb:5432/dora_metrics # pragma: allowlist secret
+      PYTHONDONTWRITEBYTECODE: "1"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+
+  # ─── Async Worker (event processor) ──────────────────────────────────────
+  worker:
+    build:
+      context: .
+      dockerfile: ingestion/Dockerfile
+    container_name: ufawkesdora-int-worker
+    command: python -m ingestion.processor.worker
+    environment:
+      DATABASE_URL: postgresql://dora_app:change_me_in_production@timescaledb:5432/dora_metrics # pragma: allowlist secret
+      PYTHONDONTWRITEBYTECODE: "1"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+
+volumes:
+  int-pgdata:
+    name: ufawkesdora_int_pgdata

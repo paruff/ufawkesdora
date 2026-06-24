@@ -43,6 +43,26 @@ on:
         required: false
         type: boolean
         default: true
+      enable-coverage-gate:
+        description: "Enable coverage quality gate"
+        required: false
+        type: boolean
+        default: false
+      coverage-threshold:
+        description: "Minimum coverage percentage for quality gate"
+        required: false
+        type: number
+        default: 80
+      python-version:
+        description: "Python version for coverage gate"
+        required: false
+        type: string
+        default: "3.11"
+      coverage-paths:
+        description: "Comma-separated package paths to measure coverage"
+        required: false
+        type: string
+        default: "compute,ingestion"
 
 permissions:
   contents: read
@@ -123,6 +143,53 @@ jobs:
             echo "⚠️  No Grafana provisioning directory found"
           fi
 
+      # ─── Coverage Quality Gate ─────────────────────────────────────────
+      - name: Set up Python for coverage
+        if: inputs.enable-coverage-gate
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install test dependencies
+        if: inputs.enable-coverage-gate
+        run: |
+          pip install pytest pytest-cov pyyaml jsonschema httpx asyncpg
+
+      - name: Run coverage quality gate
+        if: inputs.enable-coverage-gate
+        id: coverage
+        continue-on-error: true
+        run: |
+          THRESHOLD=${{ inputs.coverage-threshold }}
+          PATHS="${{ inputs.coverage-paths }}"
+          COV_ARGS=""
+          IFS=',' read -ra PKG <<< "$PATHS"
+          for pkg in "${PKG[@]}"; do
+            pkg=$(echo "$pkg" | xargs)
+            COV_ARGS="$COV_ARGS --cov=$pkg"
+          done
+
+          # Run unit tests with coverage, fail if below threshold
+          if [ -d "tests/unit" ]; then
+            echo "Running coverage gate at ${THRESHOLD}%..."
+            if pytest tests/unit/ -v --tb=short $COV_ARGS \
+              --cov-report=term-missing \
+              --cov-fail-under=$THRESHOLD; then
+              echo "coverage_result=pass" >> $GITHUB_OUTPUT
+            else
+              echo "coverage_result=failure" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "No unit tests found, skipping coverage gate"
+            echo "coverage_result=skip" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check coverage result
+        if: inputs.enable-coverage-gate && steps.coverage.outputs.coverage_result == 'failure'
+        run: |
+          echo "::error::Coverage gate FAILED — below ${{ inputs.coverage-threshold }}% threshold"
+          exit 1
+
       # ─── Build Summary ──────────────────────────────────────────────────
       - name: Generate build summary
         if: always()
@@ -145,6 +212,15 @@ jobs:
           fi
           if [ "${{ inputs.validate-grafana }}" == "true" ]; then
             echo "- ✅ Grafana provisioning validated" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ inputs.enable-coverage-gate }}" == "true" ]; then
+            if [ "${{ steps.coverage.outputs.coverage_result }}" == "pass" ]; then
+              echo "- ✅ Coverage gate: ${{ inputs.coverage-threshold }}% threshold met" >> $GITHUB_STEP_SUMMARY
+            elif [ "${{ steps.coverage.outputs.coverage_result }}" == "skip" ]; then
+              echo "- ⏭️ Coverage gate: skipped (no unit tests)" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- ❌ Coverage gate: BELOW ${{ inputs.coverage-threshold }}% threshold" >> $GITHUB_STEP_SUMMARY
+            fi
           fi
 
       - name: DORA job finish

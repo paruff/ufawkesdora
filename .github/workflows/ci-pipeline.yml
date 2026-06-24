@@ -57,6 +57,9 @@ jobs:
     uses: ./.github/workflows/reusable-build.yml
     with:
       fail-on-latest: true
+      enable-coverage-gate: true
+      coverage-threshold: 80
+      coverage-paths: "compute,ingestion"
 
   # ─── Stage 4: Tests ────────────────────────────────────────────────────
   tests:
@@ -64,10 +67,58 @@ jobs:
     needs: [build]
     uses: ./.github/workflows/ci-tests.yml
 
+  # ─── Stage 5a: Deploy (push to main only) ──────────────────────────────
+  deploy:
+    name: Deploy
+    needs: [tests]
+    if: |
+      success() &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/reusable-deploy.yml
+    with:
+      environment: dev
+      image-tag: ${{ github.sha }}
+      image-name: ghcr.io/paruff/ufawkesdora-api
+      deploy-mode: monorepo
+      manifest-path: overlays/dev
+      health-endpoint: ""
+      health-retries: 10
+      wait-for-reconciliation: 30
+      rollback-on-failure: true
+      previous-image-tag: "previous"
+
+  # ─── Stage 5b: Post-Deploy Verification (after deploy) ─────────────────
+  post-deploy:
+    name: Post-Deploy Verify
+    needs: [deploy]
+    if: |
+      success() &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/reusable-post-deploy.yml
+    with:
+      environment: dev
+      deployed-tag: ${{ github.sha }}
+      health-endpoints: ""
+      smoke-test-command: ""
+      enable-rollback: true
+      previous-image-tag: "previous"
+
   # ─── Gate: Pipeline Complete ────────────────────────────────────────────
   pipeline-complete:
     name: Pipeline Complete
-    needs: [preflight, lint, security, dependency-review, build, tests]
+    needs:
+      [
+        preflight,
+        lint,
+        security,
+        dependency-review,
+        build,
+        tests,
+        deploy,
+        post-deploy,
+      ]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -80,13 +131,17 @@ jobs:
           echo "Dependency Review:  ${{ needs.dependency-review.result }}"
           echo "Build & Validate:   ${{ needs.build.result }}"
           echo "Tests:              ${{ needs.tests.result }}"
+          echo "Deploy:             ${{ needs.deploy.result }}"
+          echo "Post-Deploy Verify: ${{ needs.post-deploy.result }}"
 
           if [ "${{ needs.preflight.result }}" == "failure" ] || \
              [ "${{ needs.lint.result }}" == "failure" ] || \
              [ "${{ needs.security.result }}" == "failure" ] || \
              [ "${{ needs.dependency-review.result }}" == "failure" ] || \
              [ "${{ needs.build.result }}" == "failure" ] || \
-             [ "${{ needs.tests.result }}" == "failure" ]; then
+             [ "${{ needs.tests.result }}" == "failure" ] || \
+             [ "${{ needs.deploy.result }}" == "failure" ] || \
+             [ "${{ needs.post-deploy.result }}" == "failure" ]; then
             echo ""
             echo "❌ Pipeline FAILED"
             exit 1

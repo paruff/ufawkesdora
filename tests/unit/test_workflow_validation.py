@@ -1,8 +1,6 @@
 """Unit tests for GitHub Actions workflow validation."""
 
-import pytest
 import yaml
-from pathlib import Path
 
 
 class TestWorkflowValidation:
@@ -48,9 +46,9 @@ class TestWorkflowValidation:
                 jobs = config.get("jobs", {})
                 for job_name, job_config in jobs.items():
                     if isinstance(job_config, dict):
-                        assert "runs-on" in job_config or "uses" in job_config, (
-                            f"{f.name} job '{job_name}' missing 'runs-on' or 'uses'"
-                        )
+                        assert (
+                            "runs-on" in job_config or "uses" in job_config
+                        ), f"{f.name} job '{job_name}' missing 'runs-on' or 'uses'"
 
     def test_no_hardcoded_secrets(self, workflow_files):
         """Workflows must not contain hardcoded secrets."""
@@ -67,9 +65,9 @@ class TestWorkflowValidation:
             with open(f) as fh:
                 content = fh.read()
                 for pattern in sensitive_patterns:
-                    assert pattern.lower() not in content.lower(), (
-                        f"{f.name} contains hardcoded secret: {pattern}"
-                    )
+                    assert (
+                        pattern.lower() not in content.lower()
+                    ), f"{f.name} contains hardcoded secret: {pattern}"
 
     def test_use_official_actions(self, workflow_files):
         """Workflows should use official GitHub actions or well-known third-party actions."""
@@ -97,9 +95,9 @@ class TestWorkflowValidation:
                             if "uses" in step:
                                 action = step["uses"]
                                 # Allow official actions and well-known third-party actions
-                                assert any(action.startswith(prefix) for prefix in allowed_actions), (
-                                    f"{f.name} job '{job_name}' uses non-standard action: {action}"
-                                )
+                                assert any(
+                                    action.startswith(prefix) for prefix in allowed_actions
+                                ), f"{f.name} job '{job_name}' uses non-standard action: {action}"
 
     def test_timeout_minutes_set(self, workflow_files):
         """Jobs should have timeout-minutes set."""
@@ -108,11 +106,16 @@ class TestWorkflowValidation:
                 config = yaml.safe_load(fh)
                 jobs = config.get("jobs", {})
                 for job_name, job_config in jobs.items():
-                    if isinstance(job_config, dict) and "uses" not in job_config:
-                        # Only check direct jobs, not reusable workflow calls
-                        if "timeout-minutes" not in job_config:
-                            import warnings
-                            warnings.warn(
-                                f"{f.name} job '{job_name}' has no timeout-minutes",
-                                UserWarning,
-                            )
+                    # Only check direct jobs, not reusable workflow calls
+                    if (
+                        isinstance(job_config, dict)
+                        and "uses" not in job_config
+                        and "timeout-minutes" not in job_config
+                    ):
+                        import warnings
+
+                        warnings.warn(
+                            f"{f.name} job '{job_name}' has no timeout-minutes",
+                            UserWarning,
+                            stacklevel=2,
+                        )

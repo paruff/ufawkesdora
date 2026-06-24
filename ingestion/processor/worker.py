@@ -9,8 +9,7 @@ Can be run as a standalone process or as a background task.
 import asyncio
 import logging
 import os
-import sys
-from typing import Callable
+from collections.abc import Callable
 
 from ingestion.api.queue import (
     close_pool,

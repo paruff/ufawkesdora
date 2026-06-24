@@ -13,7 +13,6 @@ This catches schema drift between the collectors and the event schemas.
 import json
 from pathlib import Path
 
-import pytest
 from jsonschema import Draft7Validator, FormatChecker
 
 # ── Paths ──────────────────────────────────────────────────────────────────
@@ -97,12 +96,7 @@ def find_first_commit_at(api_response: dict) -> str:
         commits,
         key=lambda c: c.get("commit", {}).get("committer", {}).get("date", ""),
     )
-    return (
-        sorted_commits[0]
-        .get("commit", {})
-        .get("committer", {})
-        .get("date", "")
-    )
+    return sorted_commits[0].get("commit", {}).get("committer", {}).get("date", "")
 
 
 def transform_pr_webhook(webhook: dict) -> dict:
@@ -129,9 +123,7 @@ def transform_pr_webhook(webhook: dict) -> dict:
         "event_type": "pr",
         "repo": repo,
         "pr_number": pr["number"],
-        "commit_sha": fixture_expectation.get(
-            "commit_sha", pr.get("merge_commit_sha", "")
-        ),
+        "commit_sha": fixture_expectation.get("commit_sha", pr.get("merge_commit_sha", "")),
         "status": fixture_expectation.get("status", "merged"),
         "occurred_at": pr.get("merged_at", ""),
         "first_commit_at": first_commit_at,
@@ -157,10 +149,7 @@ class TestDeploymentCollector:
         validator = Draft7Validator(schema, format_checker=FormatChecker())
         errors = list(validator.iter_errors(canonical))
 
-        assert not errors, (
-            f"Deployment event schema errors: "
-            + "; ".join(e.message for e in errors)
-        )
+        assert not errors, "Deployment event schema errors: " + "; ".join(e.message for e in errors)
 
     def test_transformed_event_matches_expected(self):
         """Transformed event matches the expected canonical payload."""
@@ -169,9 +158,9 @@ class TestDeploymentCollector:
         canonical = transform_deployment_webhook(fixture)
 
         for key in expected:
-            assert canonical.get(key) == expected[key], (
-                f"Field '{key}': expected {expected[key]}, got {canonical.get(key)}"
-            )
+            assert (
+                canonical.get(key) == expected[key]
+            ), f"Field '{key}': expected {expected[key]}, got {canonical.get(key)}"
 
     def test_required_fields_present(self):
         """All required deployment schema fields are present."""
@@ -181,9 +170,9 @@ class TestDeploymentCollector:
 
         required = schema.get("required", [])
         for field in required:
-            assert field in canonical and canonical[field] is not None, (
-                f"Required field '{field}' missing in transformed event"
-            )
+            assert (
+                field in canonical and canonical[field] is not None
+            ), f"Required field '{field}' missing in transformed event"
 
     def test_event_type_is_deployment(self):
         """event_type must be 'deployment'."""
@@ -216,10 +205,7 @@ class TestPRCollector:
         validator = Draft7Validator(schema, format_checker=FormatChecker())
         errors = list(validator.iter_errors(canonical))
 
-        assert not errors, (
-            f"PR event schema errors: "
-            + "; ".join(e.message for e in errors)
-        )
+        assert not errors, "PR event schema errors: " + "; ".join(e.message for e in errors)
 
     def test_transformed_event_matches_expected(self):
         """Transformed event matches the expected canonical payload."""
@@ -228,9 +214,9 @@ class TestPRCollector:
         canonical = transform_pr_webhook(fixture)
 
         for key in expected:
-            assert canonical.get(key) == expected[key], (
-                f"Field '{key}': expected {expected[key]}, got {canonical.get(key)}"
-            )
+            assert (
+                canonical.get(key) == expected[key]
+            ), f"Field '{key}': expected {expected[key]}, got {canonical.get(key)}"
 
     def test_required_fields_present(self):
         """All required PR schema fields are present."""
@@ -240,9 +226,9 @@ class TestPRCollector:
 
         required = schema.get("required", [])
         for field in required:
-            assert field in canonical and canonical[field] is not None, (
-                f"Required field '{field}' missing in transformed event"
-            )
+            assert (
+                field in canonical and canonical[field] is not None
+            ), f"Required field '{field}' missing in transformed event"
 
     def test_event_type_is_pr(self):
         """event_type must be 'pr'."""

@@ -10,3 +10,19 @@ requires-python = ">=3.11"
 
 [tool.setuptools.packages.find]
 include = ["ingestion*", "compute*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]

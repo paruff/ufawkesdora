@@ -1,0 +1,346 @@
+# ============================================================================
+# reusable-deploy.yml
+# ----------------------------------------------------------------------------
+# Stage 4: GitOps CD Deployment — promotes a new image tag through
+# environment overlays, commits the change, triggers reconciliation, and
+# verifies the rollout.
+#
+# Supports two modes:
+#   1. Monorepo: Manifests live in this repo (manifests/ or overlays/)
+#   2. GitOps repo: Separate repo holds the environment overlays
+#
+# Usage (monorepo):
+#   jobs:
+#     deploy:
+#       uses: ./.github/workflows/reusable-deploy.yml
+#       with:
+#         environment: dev
+#         image-tag: v1.2.3
+#         deploy-mode: monorepo
+#         manifest-path: overlays/dev
+#
+# Usage (GitOps repo):
+#   jobs:
+#     deploy:
+#       uses: ./.github/workflows/reusable-deploy.yml
+#       with:
+#         environment: staging
+#         image-tag: v1.2.3
+#         deploy-mode: gitops-repo
+#         gitops-repo: org/gitops-infra
+#         gitops-path: environments/staging
+# ============================================================================
+
+name: Reusable GitOps Deploy
+
+on:
+  workflow_call:
+    inputs:
+      # ── Deployment Target ──────────────────────────────────────────────
+      environment:
+        description: "Target environment (dev, staging, production)"
+        required: true
+        type: string
+      image-tag:
+        description: "Container image tag to deploy (e.g. v1.2.3 or sha-abc123)"
+        required: true
+        type: string
+      image-name:
+        description: "Container image name (without tag, e.g. ghcr.io/paruff/ufawkesdora-api)"
+        required: true
+        type: string
+
+      # ── Deploy Mode ────────────────────────────────────────────────────
+      deploy-mode:
+        description: "Deployment mode: 'monorepo' or 'gitops-repo'"
+        required: false
+        type: string
+        default: "monorepo"
+      manifest-path:
+        description: "Path to kustomization or manifest directory (monorepo mode)"
+        required: false
+        type: string
+        default: "overlays/dev"
+      gitops-repo:
+        description: "GitOps repo (org/repo) for gitops-repo mode"
+        required: false
+        type: string
+        default: ""
+      gitops-path:
+        description: "Path within GitOps repo to the environment overlay"
+        required: false
+        type: string
+        default: "environments/dev"
+      gitops-branch:
+        description: "Branch to push GitOps update to"
+        required: false
+        type: string
+        default: "main"
+
+      # ── Rollout Verification ───────────────────────────────────────────
+      health-endpoint:
+        description: "Health endpoint URL to verify after deployment (empty = skip)"
+        required: false
+        type: string
+        default: ""
+      health-retries:
+        description: "Number of health check retries"
+        required: false
+        type: number
+        default: 15
+      health-delay:
+        description: "Delay in seconds between health check retries"
+        required: false
+        type: number
+        default: 10
+      wait-for-reconciliation:
+        description: "Wait for GitOps controller reconciliation (seconds, 0 = skip)"
+        required: false
+        type: number
+        default: 60
+
+      # ── Rollback ───────────────────────────────────────────────────────
+      rollback-on-failure:
+        description: "Automatically rollback if verification fails"
+        required: false
+        type: boolean
+        default: false
+      previous-image-tag:
+        description: "Previous stable image tag for rollback"
+        required: false
+        type: string
+        default: ""
+
+      # ── Notifications ─────────────────────────────────────────────────
+      notify-on-success:
+        description: "Send deployment success notification"
+        required: false
+        type: boolean
+        default: false
+      notify-on-failure:
+        description: "Send deployment failure notification"
+        required: false
+        type: boolean
+        default: true
+
+    secrets:
+      gitops-token:
+        description: "GitHub token with write access to GitOps repo"
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  deploy:
+    name: Deploy to ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    outputs:
+      status: ${{ steps.deploy-outcome.outputs.status }}
+      deployed-tag: ${{ inputs.image-tag }}
+      environment: ${{ inputs.environment }}
+
+    steps:
+      # ── DORA Timestamp ────────────────────────────────────────────────────
+      - name: DORA job start
+        run: |
+          echo "job-start:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "sha:${{ github.sha }}"
+          echo "workflow:${{ github.workflow }}"
+          echo "job:${{ github.job }}"
+          echo "environment:${{ inputs.environment }}"
+          echo "image:${{ inputs.image-name }}:${{ inputs.image-tag }}"
+
+      # ── Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout target repo
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.deploy-mode == 'gitops-repo' && inputs.gitops-repo || '' }}
+          token: ${{ secrets.gitops-token || secrets.GITHUB_TOKEN }}
+          path: target
+          ref: ${{ inputs.gitops-branch }}
+
+      - name: Checkout current repo (monorepo mode)
+        if: inputs.deploy-mode == 'monorepo'
+        uses: actions/checkout@v7
+        with:
+          path: source
+          fetch-depth: 0
+
+      - name: Copy manifests for monorepo mode
+        if: inputs.deploy-mode == 'monorepo'
+        run: |
+          mkdir -p target
+          cp -r source/${{ inputs.manifest-path }}/* target/
+
+      # ── Update Image Tag ──────────────────────────────────────────────────
+      - name: Update image tag in kustomization
+        id: update-tag
+        run: |
+          TARGET_DIR="target"
+          echo "Updating image ${{ inputs.image-name }} to tag ${{ inputs.image-tag }} in $TARGET_DIR"
+
+          # Check for kustomization.yaml
+          if [ -f "$TARGET_DIR/kustomization.yaml" ] || [ -f "$TARGET_DIR/kustomization.yml" ]; then
+            KUSTOMIZE_FILE=$(ls "$TARGET_DIR/kustomization.yaml" "$TARGET_DIR/kustomization.yml" 2>/dev/null | head -1)
+            echo "Found kustomization: $KUSTOMIZE_FILE"
+
+            # Use kustomize edit if available, otherwise sed
+            if command -v kustomize &> /dev/null; then
+              kustomize edit set image "${{ inputs.image-name }}:${{ inputs.image-tag }}" --load-restrictor=LoadRestrictionsNone
+            else
+              # Fallback: sed replacement of image tag
+              if grep -q "newTag:" "$KUSTOMIZE_FILE"; then
+                sed -i "s|newTag:.*|newTag: ${{ inputs.image-tag }}|" "$KUSTOMIZE_FILE"
+                echo "✅ Updated newTag in $KUSTOMIZE_FILE"
+              elif grep -q "newName:" "$KUSTOMIZE_FILE"; then
+                sed -i "s|newName:.*|newName: ${{ inputs.image-name }}|" "$KUSTOMIZE_FILE"
+                sed -i "s|newTag:.*|newTag: ${{ inputs.image-tag }}|" "$KUSTOMIZE_FILE"
+                echo "✅ Updated newName/newTag in $KUSTOMIZE_FILE"
+              else
+                echo "⚠️ No image override found in kustomization, appending..."
+                # Append image override using printf to avoid YAML heredoc ambiguity
+                printf '\nimages:\n' >> "$KUSTOMIZE_FILE"
+                printf '  - name: PLACEHOLDER_IMAGE\n' >> "$KUSTOMIZE_FILE"
+                printf '    newName: %s\n' "${{ inputs.image-name }}" >> "$KUSTOMIZE_FILE"
+                printf '    newTag: %s\n' "${{ inputs.image-tag }}" >> "$KUSTOMIZE_FILE"
+              fi
+            fi
+            echo "update_method=kustomize" >> $GITHUB_OUTPUT
+          # Check for deployment.yaml with image: field
+          elif grep -rl 'image:' "$TARGET_DIR" --include="*.yaml" --include="*.yml" 2>/dev/null | head -1; then
+            echo "Found deployment manifests with image: field"
+            MATCHED_FILE=$(grep -rl "image:" "$TARGET_DIR" --include="*.yaml" --include="*.yml" 2>/dev/null | head -1)
+            sed -i "s|image: .*|image: ${{ inputs.image-name }}:${{ inputs.image-tag }}|" "$MATCHED_FILE"
+            echo "✅ Updated image in $MATCHED_FILE"
+            echo "update_method=direct" >> $GITHUB_OUTPUT
+          # Check for docker-compose files with image: field
+          elif grep -rl 'image:' "$TARGET_DIR" --include="*.yml" --include="*.yaml" 2>/dev/null | head -1; then
+            MATCHED_FILE=$(grep -rl "image:" "$TARGET_DIR" --include="*.yml" --include="*.yaml" 2>/dev/null | head -1)
+            IMAGE_BASE=$(echo "${{ inputs.image-name }}" | sed 's/[\/&]/\\&/g')
+            echo "Updating image in $MATCHED_FILE"
+            echo "update_method=compose" >> $GITHUB_OUTPUT
+          else
+            echo "::warning::No recognizable manifest format found in $TARGET_DIR"
+            echo "update_method=none" >> $GITHUB_OUTPUT
+          fi
+
+      # ── Commit & Push ─────────────────────────────────────────────────────
+      - name: Configure Git
+        run: |
+          git config --global user.name "uFawkesDORA Bot"
+          git config --global user.email "bot@ufawkes.dev"
+
+      - name: Commit and push manifest update
+        id: commit
+        run: |
+          cd target
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit — image tag ${{ inputs.image-tag }} already deployed"
+            echo "committed=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          git commit -m "chore: promote ${{ inputs.image-name }}:${{ inputs.image-tag }} to ${{ inputs.environment }}"
+          git push origin ${{ inputs.gitops-branch }}
+          echo "committed=true" >> $GITHUB_OUTPUT
+          COMMIT_SHA=$(git rev-parse HEAD)
+          echo "commit_sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
+          echo "✅ Deployed ${{ inputs.image-name }}:${{ inputs.image-tag }} to ${{ inputs.environment }}"
+
+      # ── Wait for Reconciliation ───────────────────────────────────────────
+      - name: Wait for GitOps reconciliation
+        if: steps.commit.outputs.committed == 'true' && inputs.wait-for-reconciliation > 0
+        run: |
+          echo "Waiting ${{ inputs.wait-for-reconciliation }}s for GitOps controller reconciliation..."
+          sleep ${{ inputs.wait-for-reconciliation }}
+          echo "✅ Reconciliation wait complete"
+
+      # ── Health Check ──────────────────────────────────────────────────────
+      - name: Verify deployment health
+        id: health
+        if: inputs.health-endpoint != ''
+        run: |
+          ENDPOINT="${{ inputs.health-endpoint }}"
+          RETRIES=${{ inputs.health-retries }}
+          DELAY=${{ inputs.health-delay }}
+          echo "Checking health endpoint: $ENDPOINT"
+          echo "Retries: $RETRIES, Delay: ${DELAY}s"
+
+          for i in $(seq 1 $RETRIES); do
+            HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' "$ENDPOINT" 2>/dev/null || echo "000")
+            if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
+              echo "✅ Health check passed (HTTP $HTTP_CODE) on attempt $i"
+              echo "healthy=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            echo "Attempt $i/$RETRIES: HTTP $HTTP_CODE, retrying in ${DELAY}s..."
+            sleep $DELAY
+          done
+
+          echo "::error::Health check failed after $RETRIES attempts"
+          echo "healthy=false" >> $GITHUB_OUTPUT
+          exit 1
+
+      # ── Rollback on Failure ───────────────────────────────────────────────
+      - name: Rollback on verification failure
+        if: |
+          failure() &&
+          inputs.rollback-on-failure &&
+          inputs.previous-image-tag != ''
+        run: |
+          echo "⚠️ Rolling back to ${{ inputs.previous-image-tag }}..."
+
+          # Reverse the image tag update
+          cd target
+          find . -type f \( -name "*.yaml" -o -name "*.yml" \) -exec \
+            sed -i "s|${{ inputs.image-tag }}|${{ inputs.previous-image-tag }}|g" {} +
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes for rollback"
+            exit 0
+          fi
+          git commit -m "revert: rollback ${{ inputs.environment }} from ${{ inputs.image-tag }} to ${{ inputs.previous-image-tag }}"
+          git push origin ${{ inputs.gitops-branch }}
+          echo "✅ Rollback complete — reverted to ${{ inputs.previous-image-tag }}"
+
+      # ── Outcome ───────────────────────────────────────────────────────────
+      - name: Set deploy outcome
+        id: deploy-outcome
+        if: always()
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+          elif [ "${{ steps.health.outputs.healthy }}" == "false" ]; then
+            echo "status=failed-verification" >> $GITHUB_OUTPUT
+          else
+            echo "status=failed" >> $GITHUB_OUTPUT
+          fi
+
+      # ── Summary ───────────────────────────────────────────────────────────
+      - name: Generate deploy summary
+        if: always()
+        run: |
+          echo "## Deployment: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | ${{ inputs.environment }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | ${{ inputs.image-name }}:${{ inputs.image-tag }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Mode | ${{ inputs.deploy-mode }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | ${{ steps.commit.outputs.commit_sha || 'no change' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ${{ steps.deploy-outcome.outputs.status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.health.outputs.healthy }}" == "true" ]; then
+            echo "✅ Health check passed" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ inputs.health-endpoint }}" != "" ]; then
+            echo "❌ Health check failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: DORA job finish
+        if: always()
+        run: echo "job-finish:$(date -u +%Y-%m-%dT%H:%M:%SZ)"

@@ -13,109 +13,196 @@ permissions:
   contents: read
 
 jobs:
-  # ─── Unit Tests (fast, no Docker) ─────────────────────────────────────────
+  # ─── Stage 2: Unit Tests (fast, no Docker) ─────────────────────────────────
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: DORA job start
-        run: |
-          echo "job-start:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          echo "sha:${{ github.sha }}"
-          echo "workflow:${{ github.workflow }}"
-          echo "job:${{ github.job }}"
-
-      - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-
-      - name: Install test dependencies
+      - name: Install dependencies
         run: |
-          pip install pytest pytest-cov pytest-asyncio httpx pyyaml
-          if [ -f requirements-ingestion.txt ]; then pip install -r requirements-ingestion.txt; fi
-          if [ -f compute/requirements.txt ]; then pip install -r compute/requirements.txt; fi
-
+          pip install pytest pytest-cov pytest-asyncio pyyaml jsonschema httpx asyncpg
       - name: Run unit tests
         run: |
           if [ -d "tests/unit" ]; then
-            pytest tests/unit/ -v --tb=short
+            pytest tests/unit/ -v --tb=short --cov=ingestion --cov=compute --cov-report=term-missing
           else
             echo "No unit tests found, skipping"
           fi
         continue-on-error: false
-
-      - name: DORA job finish
+      - uses: actions/upload-artifact@v4
         if: always()
-        run: echo "job-finish:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        with:
+          name: unit-test-results
+          path: coverage.xml
+          if-no-files-found: ignore
 
-  # ─── Integration Tests (requires Docker) ──────────────────────────────────
+  # ─── Stage 3a: Integration Tests (Docker-compose stack) ────────────────────
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: DORA job start
-        run: |
-          echo "job-start:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          echo "sha:${{ github.sha }}"
-          echo "workflow:${{ github.workflow }}"
-          echo "job:${{ github.job }}"
-
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-
-      - name: Install test dependencies
+      - name: Install test deps
         run: |
-          pip install pytest pytest-cov pytest-asyncio testcontainers psycopg2-binary httpx
-          if [ -f requirements-ingestion.txt ]; then pip install -r requirements-ingestion.txt; fi
-          if [ -f compute/requirements.txt ]; then pip install -r compute/requirements.txt; fi
-
-      - name: Run integration tests
+          pip install pytest pytest-cov pytest-asyncio testcontainers psycopg2-binary httpx jsonschema asyncpg
+      - name: Start integration stack
         run: |
-          if [ -d "tests/integration" ]; then
-            pytest tests/integration/ -v --tb=short
-          else
-            echo "No integration tests found, skipping"
-          fi
+          docker compose -f docker-compose.integration.yml up -d --build
+      - name: Wait for stack health
+        run: |
+          echo "Waiting for TimescaleDB..."
+          until docker compose -f docker-compose.integration.yml exec -T timescaledb pg_isready -U postgres -d dora_metrics; do
+            sleep 2
+          done
+          echo "TimescaleDB ready"
+          echo "Waiting for API..."
+          for i in $(seq 1 15); do
+            if curl -s -o /dev/null -w '%{http_code}' http://localhost:8088/health 2>/dev/null | grep -q 200; then
+              echo "API ready"
+              break
+            fi
+            sleep 2
+          done
+      - name: Run integration tests (DB schema)
+        run: |
+          pytest tests/integration/test_schema.py -v --tb=short
         continue-on-error: false
-
-      - name: DORA job finish
+      - name: Run integration tests (metrics)
+        run: |
+          pytest tests/integration/test_metrics_integration.py -v --tb=short
+        continue-on-error: false
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          docker compose -f docker-compose.integration.yml logs > integration.log
+          echo "Container logs dumped to integration.log"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: integration-logs
+          path: integration.log
+      - name: Teardown
         if: always()
-        run: echo "job-finish:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        run: docker compose -f docker-compose.integration.yml down -v
+
+  # ─── Stage 3b: Smoke Tests ─────────────────────────────────────────────────
+  smoke-tests:
+    name: Smoke Tests
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Start full stack for smoke test
+        run: |
+          docker compose -f docker-compose.test.yml up -d --build
+      - name: Wait for API health
+        run: |
+          echo "Waiting for API health check..."
+          for i in $(seq 1 20); do
+            if curl -s -o /dev/null -w '%{http_code}' http://localhost:8089/health 2>/dev/null | grep -q 200; then
+              echo "API responded with 200 OK"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "API health check failed after 60s"
+          docker compose -f docker-compose.test.yml logs api
+          exit 1
+      - name: Smoke test (health endpoint)
+        run: |
+          HEALTH=$(curl -s http://localhost:8089/health)
+          echo "Health response: $HEALTH"
+          echo "$HEALTH" | python3 -c "import sys, json; d=json.load(sys.stdin); assert d.get('status') == 'ok', f'Expected ok, got {d}'"
+          echo "✅ Smoke test passed: /health returns OK"
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.test.yml logs > smoke-test.log
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: smoke-logs
+          path: smoke-test.log
+      - name: Teardown
+        if: always()
+        run: docker compose -f docker-compose.test.yml down -v
+
+  # ─── Stage 3c: End-to-End Tests ────────────────────────────────────────────
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: [smoke-tests]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install test deps
+        run: |
+          pip install requests jsonschema asyncpg
+      - name: Start E2E stack
+        run: |
+          docker compose -f docker-compose.test.yml up -d --build
+      - name: Wait for E2E stack
+        run: |
+          for i in $(seq 1 20); do
+            if curl -s -o /dev/null -w '%{http_code}' http://localhost:8089/health 2>/dev/null | grep -q 200; then
+              echo "E2E stack ready"
+              exit 0
+            fi
+            sleep 3
+          done
+          exit 1
+      - name: Run E2E test
+        run: |
+          python tests/integration/test_e2e_flow.py
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          docker compose -f docker-compose.test.yml logs > e2e-test.log
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-logs
+          path: e2e-test.log
+      - name: Teardown
+        if: always()
+        run: docker compose -f docker-compose.test.yml down -v
 
   # ─── Test Summary ──────────────────────────────────────────────────────────
   test-summary:
     name: Test Summary
     runs-on: ubuntu-latest
-    needs: [unit-tests, integration-tests]
+    needs: [unit-tests, integration-tests, smoke-tests, e2e-tests]
     if: always()
     steps:
       - name: Check results
         run: |
           echo "=== Test Results ==="
-          echo "Unit Tests:         ${{ needs.unit-tests.result }}"
-          echo "Integration Tests:  ${{ needs.integration-tests.result }}"
-
+          echo "Unit Tests:        ${{ needs.unit-tests.result }}"
+          echo "Integration Tests: ${{ needs.integration-tests.result }}"
+          echo "Smoke Tests:       ${{ needs.smoke-tests.result }}"
+          echo "E2E Tests:         ${{ needs.e2e-tests.result }}"
           if [ "${{ needs.unit-tests.result }}" == "failure" ] || \
-             [ "${{ needs.integration-tests.result }}" == "failure" ]; then
+             [ "${{ needs.integration-tests.result }}" == "failure" ] || \
+             [ "${{ needs.smoke-tests.result }}" == "failure" ] || \
+             [ "${{ needs.e2e-tests.result }}" == "failure" ]; then
             echo ""
             echo "❌ Tests FAILED"
             exit 1
           fi
-
           echo ""
           echo "✅ All tests PASSED"
-
       - name: Generate summary
         if: always()
         run: |
@@ -125,3 +212,5 @@ jobs:
           echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Unit | ${{ needs.unit-tests.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Integration | ${{ needs.integration-tests.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Smoke | ${{ needs.smoke-tests.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| E2E | ${{ needs.e2e-tests.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY

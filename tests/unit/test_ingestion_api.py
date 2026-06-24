@@ -8,15 +8,12 @@ Tests cover:
 - Batch endpoint validation
 """
 
-import json
-from pathlib import Path
-from unittest.mock import ANY, AsyncMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from ingestion.api.main import app
-
 
 # ── Fixtures ───────────────────────────────────────────────────────────────────
 
@@ -87,6 +84,7 @@ def mock_queue():
     ``from ingestion.api.queue import enqueue_event`` (direct binding).
     Uses smarter mocks so ``enqueue_events([])`` returns ``[]``.
     """
+
     async def mock_enqueue_events(payloads):
         return list(range(1, len(payloads) + 1))
 

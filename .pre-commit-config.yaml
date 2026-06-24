@@ -29,6 +29,24 @@ repos:
         name: Detect private keys
 
   # ============================================================================
+  # Python Linting & Formatting
+  # ============================================================================
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.0
+    hooks:
+      - id: ruff
+        name: Lint Python with Ruff
+        args: ["--fix"]
+      - id: ruff-format
+        name: Format Python with Ruff
+
+  - repo: https://github.com/psf/black
+    rev: 24.3.0
+    hooks:
+      - id: black
+        name: Format Python with Black
+
+  # ============================================================================
   # YAML Linting
   # ============================================================================
   - repo: https://github.com/adrienverge/yamllint
