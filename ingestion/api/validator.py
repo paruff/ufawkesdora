@@ -6,10 +6,8 @@ Returns structured 422 errors with field-level detail — not just "invalid".
 
 import json
 from pathlib import Path
-from typing import Any
 
-from jsonschema import Draft7Validator, ValidationError, validate
-from jsonschema import FormatChecker
+from jsonschema import Draft7Validator, FormatChecker
 
 # ── Format checker for date-time ───────────────────────────────────────────────
 # jsonschema does not ship with date-time format validation by default.
@@ -18,6 +16,7 @@ from jsonschema import FormatChecker
 def _check_date_time(instance: str) -> bool:
     """Validate ISO 8601 date-time strings."""
     import datetime
+
     if not isinstance(instance, str):
         return True
     try:
@@ -86,9 +85,11 @@ class ValidationResult:
     def to_error_response(self) -> dict:
         return {
             "detail": [
-                {"loc": ["body", e.field[0]] if e.field else ["body"],
-                 "msg": e.message,
-                 "type": "value_error"}
+                {
+                    "loc": ["body", e.field[0]] if e.field else ["body"],
+                    "msg": e.message,
+                    "type": "value_error",
+                }
                 for e in self.errors
             ]
         }
@@ -107,23 +108,27 @@ def validate_payload(payload: dict) -> ValidationResult:
     # Step 1: event_type must be present
     event_type = payload.get("event_type")
     if not event_type or not isinstance(event_type, str):
-        return ValidationResult(errors=[
-            ValidationDetail(
-                field=["event_type"],
-                message="field is required and must be a string",
-            )
-        ])
+        return ValidationResult(
+            errors=[
+                ValidationDetail(
+                    field=["event_type"],
+                    message="field is required and must be a string",
+                )
+            ]
+        )
 
     # Step 2: event_type must be known
     schema_file = EVENT_TYPE_SCHEMA_MAP.get(event_type)
     if schema_file is None:
-        return ValidationResult(errors=[
-            ValidationDetail(
-                field=["event_type"],
-                message=f"unknown event_type '{event_type}'. "
-                        f"Supported: {', '.join(EVENT_TYPE_SCHEMA_MAP.keys())}",
-            )
-        ])
+        return ValidationResult(
+            errors=[
+                ValidationDetail(
+                    field=["event_type"],
+                    message=f"unknown event_type '{event_type}'. "
+                    f"Supported: {', '.join(EVENT_TYPE_SCHEMA_MAP.keys())}",
+                )
+            ]
+        )
 
     # Step 3: load schema and validate
     schema = _load_schema(schema_file)
@@ -133,10 +138,12 @@ def validate_payload(payload: dict) -> ValidationResult:
 
     errors: list[ValidationDetail] = []
     for error in sorted(validator.iter_errors(payload), key=lambda e: e.path):
-        errors.append(ValidationDetail(
-            field=list(error.path),
-            message=error.message,
-        ))
+        errors.append(
+            ValidationDetail(
+                field=list(error.path),
+                message=error.message,
+            )
+        )
 
     if errors:
         return ValidationResult(errors=errors)

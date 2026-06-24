@@ -18,7 +18,6 @@ from fastapi.responses import JSONResponse
 from ingestion.api.queue import close_pool, enqueue_event, enqueue_events, get_queue_depth
 from ingestion.api.validator import validate_payload, validate_payloads
 
-
 # ── Lifecycle ──────────────────────────────────────────────────────────────────
 
 

@@ -5,10 +5,8 @@ worker-safe dequeueing.
 """
 
 import json
-from typing import Any
 
 import asyncpg
-
 
 # ── Connection pool ────────────────────────────────────────────────────────────
 
@@ -24,6 +22,7 @@ async def get_pool(dsn: str | None = None, min_size: int = 2, max_size: int = 10
     if _pool is None or _pool.is_closing():
         if dsn is None:
             import os
+
             dsn = os.environ["DATABASE_URL"]
         _pool = await asyncpg.create_pool(
             dsn,
@@ -83,22 +82,21 @@ async def enqueue_events(payloads: list[dict]) -> list[int]:
     pool = await get_pool()
     ids: list[int] = []
 
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            for payload in payloads:
-                event_type: str = payload.get("event_type", "unknown")
-                source: str = payload.get("repo", "unknown")
-                row = await conn.fetchrow(
-                    """
+    async with pool.acquire() as conn, conn.transaction():
+        for payload in payloads:
+            event_type: str = payload.get("event_type", "unknown")
+            source: str = payload.get("repo", "unknown")
+            row = await conn.fetchrow(
+                """
                     INSERT INTO event_queue (event_type, source, payload)
                     VALUES ($1, $2, $3::jsonb)
                     RETURNING id
                     """,
-                    event_type,
-                    source,
-                    json.dumps(payload),
-                )
-                ids.append(row["id"])
+                event_type,
+                source,
+                json.dumps(payload),
+            )
+            ids.append(row["id"])
 
     return ids
 

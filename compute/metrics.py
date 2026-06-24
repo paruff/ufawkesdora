@@ -26,9 +26,7 @@ import asyncio
 import json
 import logging
 import os
-import sys
-from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 logger = logging.getLogger("ufawkesdora.metrics")
@@ -37,34 +35,34 @@ logger = logging.getLogger("ufawkesdora.metrics")
 # Source: DORA State of DevOps Report 2025
 TIER_THRESHOLDS = {
     "deployment_frequency": {
-        "elite": (lambda v: v >= 7.0),           # Multiple deploys/day = 7+/week
-        "high": (lambda v: 1.0 <= v < 7.0),       # Daily to weekly
-        "medium": (lambda v: 0.25 <= v < 1.0),    # Weekly to monthly = ~1/month
-        "low": (lambda v: v < 0.25),              # Less than monthly (~1/quarter = 0.08)
+        "elite": (lambda v: v >= 7.0),  # Multiple deploys/day = 7+/week
+        "high": (lambda v: 1.0 <= v < 7.0),  # Daily to weekly
+        "medium": (lambda v: 0.25 <= v < 1.0),  # Weekly to monthly = ~1/month
+        "low": (lambda v: v < 0.25),  # Less than monthly (~1/quarter = 0.08)
     },
     "lead_time": {
-        "elite": (lambda v: v <= 1.0),             # Less than 1 hour
-        "high": (lambda v: 1.0 < v <= 24.0),       # 1 day
-        "medium": (lambda v: 24.0 < v <= 168.0),   # 1 week
-        "low": (lambda v: v > 168.0),              # More than 1 week
+        "elite": (lambda v: v <= 1.0),  # Less than 1 hour
+        "high": (lambda v: 1.0 < v <= 24.0),  # 1 day
+        "medium": (lambda v: 24.0 < v <= 168.0),  # 1 week
+        "low": (lambda v: v > 168.0),  # More than 1 week
     },
     "fdrt": {
-        "elite": (lambda v: v <= 1.0),             # Less than 1 hour
-        "high": (lambda v: 1.0 < v <= 24.0),       # 1 day
-        "medium": (lambda v: 24.0 < v <= 168.0),   # 1 week
-        "low": (lambda v: v > 168.0),              # More than 1 week
+        "elite": (lambda v: v <= 1.0),  # Less than 1 hour
+        "high": (lambda v: 1.0 < v <= 24.0),  # 1 day
+        "medium": (lambda v: 24.0 < v <= 168.0),  # 1 week
+        "low": (lambda v: v > 168.0),  # More than 1 week
     },
     "cfr": {
-        "elite": (lambda v: v <= 0.05),            # <= 5%
-        "high": (lambda v: 0.05 < v <= 0.10),      # 10%
-        "medium": (lambda v: 0.10 < v <= 0.15),    # 15%
-        "low": (lambda v: v > 0.15),               # > 15%
+        "elite": (lambda v: v <= 0.05),  # <= 5%
+        "high": (lambda v: 0.05 < v <= 0.10),  # 10%
+        "medium": (lambda v: 0.10 < v <= 0.15),  # 15%
+        "low": (lambda v: v > 0.15),  # > 15%
     },
     "rework_rate": {
-        "elite": (lambda v: v <= 0.05),            # <= 5%
-        "high": (lambda v: 0.05 < v <= 0.10),      # 10%
-        "medium": (lambda v: 0.10 < v <= 0.15),    # 15%
-        "low": (lambda v: v > 0.15),               # > 15%
+        "elite": (lambda v: v <= 0.05),  # <= 5%
+        "high": (lambda v: 0.05 < v <= 0.10),  # 10%
+        "medium": (lambda v: 0.10 < v <= 0.15),  # 15%
+        "low": (lambda v: v > 0.15),  # > 15%
     },
 }
 
@@ -102,13 +100,12 @@ class MetricsDB:
     def __init__(self, dsn: str | None = None):
         self.dsn = dsn or os.environ.get("DATABASE_URL")
         if self.dsn is None:
-            raise ValueError(
-                "DATABASE_URL must be set or dsn argument provided"
-            )
+            raise ValueError("DATABASE_URL must be set or dsn argument provided")
         self.pool = None
 
     async def connect(self):
         import asyncpg
+
         self.pool = await asyncpg.create_pool(self.dsn, min_size=1, max_size=5)
 
     async def close(self):
@@ -149,9 +146,7 @@ class MetricsDB:
             rows = await conn.fetch(query)
             return [dict(r) for r in rows]
 
-    async def lead_time(
-        self, window_days: int, team: str | None
-    ) -> list[dict[str, Any]]:
+    async def lead_time(self, window_days: int, team: str | None) -> list[dict[str, Any]]:
         """Lead Time for Changes: P50 and P95 in hours.
 
         Uses ``metadata->>'first_commit_at'`` as the code committed timestamp.
@@ -240,9 +235,7 @@ class MetricsDB:
                     result[d["team_id"]] = d
             return list(result.values())
 
-    async def fdrt(
-        self, window_days: int, team: str | None
-    ) -> list[dict[str, Any]]:
+    async def fdrt(self, window_days: int, team: str | None) -> list[dict[str, Any]]:
         """Failure Deployment Recovery Time (FDRT).
 
         DORA 2025 reclassification: FDRT is the time between a failed deployment
@@ -304,9 +297,7 @@ class MetricsDB:
             rows = await conn.fetch(query)
             return [dict(r) for r in rows]
 
-    async def change_failure_rate(
-        self, window_days: int, team: str | None
-    ) -> list[dict[str, Any]]:
+    async def change_failure_rate(self, window_days: int, team: str | None) -> list[dict[str, Any]]:
         """Change Failure Rate: % of deployments that fail or rollback."""
         team_clause = f"AND source = '{team}'" if team and team != "all" else ""
         query = f"""
@@ -325,9 +316,7 @@ class MetricsDB:
             rows = await conn.fetch(query)
             return [dict(r) for r in rows]
 
-    async def rework_rate(
-        self, window_days: int, team: str | None
-    ) -> list[dict[str, Any]]:
+    async def rework_rate(self, window_days: int, team: str | None) -> list[dict[str, Any]]:
         """Rework Rate: user-visible rework events / total deployments.
 
         Only counts rework events where ``user_visible`` is true — hotfixes
@@ -413,13 +402,17 @@ async def compute_all_metrics(
 
 def _ensure_team_entry(teams: dict[str, dict], team_id: str, proxy: bool = False) -> dict:
     """Get or create a team entry, initializing all metric keys to None."""
-    ALL_METRIC_KEYS = [
-        "deployment_frequency", "lead_time_p50_hours", "lead_time_p95_hours",
-        "fdrt_p50_hours", "change_failure_rate", "rework_rate_pct",
+    all_metric_keys = [
+        "deployment_frequency",
+        "lead_time_p50_hours",
+        "lead_time_p95_hours",
+        "fdrt_p50_hours",
+        "change_failure_rate",
+        "rework_rate_pct",
     ]
     if team_id not in teams:
         entry = {"team_id": team_id, "proxy_metrics": proxy}
-        for k in ALL_METRIC_KEYS:
+        for k in all_metric_keys:
             entry[k] = None
         teams[team_id] = entry
     return teams[team_id]
@@ -452,7 +445,9 @@ def _merge_team_results(
     for row in fdrt_res:
         tid = row["team_id"]
         entry = _ensure_team_entry(teams, tid)
-        entry["fdrt_p50_hours"] = float(row["p50_fdrt_hours"]) if row["p50_fdrt_hours"] is not None else None
+        entry["fdrt_p50_hours"] = (
+            float(row["p50_fdrt_hours"]) if row["p50_fdrt_hours"] is not None else None
+        )
 
     for row in cfr:
         tid = row["team_id"]
@@ -462,25 +457,19 @@ def _merge_team_results(
     for row in rr:
         tid = row["team_id"]
         entry = _ensure_team_entry(teams, tid)
-        entry["rework_rate_pct"] = float(row["rework_pct"]) if row["rework_pct"] is not None else None
+        entry["rework_rate_pct"] = (
+            float(row["rework_pct"]) if row["rework_pct"] is not None else None
+        )
 
     # Add DORA tiers
-    for tid, entry in teams.items():
+    for _tid, entry in teams.items():
         entry["dora_tier_deployment_frequency"] = classify_tier(
             "deployment_frequency", entry.get("deployment_frequency")
         )
-        entry["dora_tier_lead_time"] = classify_tier(
-            "lead_time", entry.get("lead_time_p50_hours")
-        )
-        entry["dora_tier_fdrt"] = classify_tier(
-            "fdrt", entry.get("fdrt_p50_hours")
-        )
-        entry["dora_tier_cfr"] = classify_tier(
-            "cfr", entry.get("change_failure_rate")
-        )
-        entry["dora_tier_rework_rate"] = classify_tier(
-            "rework_rate", entry.get("rework_rate_pct")
-        )
+        entry["dora_tier_lead_time"] = classify_tier("lead_time", entry.get("lead_time_p50_hours"))
+        entry["dora_tier_fdrt"] = classify_tier("fdrt", entry.get("fdrt_p50_hours"))
+        entry["dora_tier_cfr"] = classify_tier("cfr", entry.get("change_failure_rate"))
+        entry["dora_tier_rework_rate"] = classify_tier("rework_rate", entry.get("rework_rate_pct"))
 
     return list(teams.values())
 
@@ -491,7 +480,7 @@ async def _write_snapshots(
     window_days: int,
 ):
     """Write metric results to the dora_snapshots hypertable."""
-    window_end = datetime.now(timezone.utc)
+    window_end = datetime.now(UTC)
     window_start = window_end - timedelta(days=window_days)
 
     for record in results:
@@ -533,28 +522,38 @@ async def _push_metrics(
         tier = record.get("dora_tier_deployment_frequency", "unknown")
 
         # Build Prometheus text format payload
-        lines = []
+        lines: list[str] = []
 
-        def gauge(name: str, value: float | None, tier_label: str | None = None):
+        def gauge(
+            name: str,
+            value: float | None,
+            tier_label: str | None = None,
+            _tid: str = tid,
+            _lines: list[str] = lines,
+        ) -> None:
             if value is None:
                 return
-            labels = f'team_id="{tid}"'
+            labels = f'team_id="{_tid}"'
             if tier_label:
                 labels += f',tier="{tier_label}"'
-            lines.append(f"# HELP {name} DORA metric")
-            lines.append(f"# TYPE {name} gauge")
-            lines.append(f"{name}{{{labels}}} {value}")
+            _lines.append(f"# HELP {name} DORA metric")
+            _lines.append(f"# TYPE {name} gauge")
+            _lines.append(f"{name}{{{labels}}} {value}")
 
         gauge("dora_deployment_frequency_per_week", record.get("deployment_frequency"), tier)
-        gauge("dora_lead_time_p50_hours", record.get("lead_time_p50_hours"),
-              record.get("dora_tier_lead_time"))
+        gauge(
+            "dora_lead_time_p50_hours",
+            record.get("lead_time_p50_hours"),
+            record.get("dora_tier_lead_time"),
+        )
         gauge("dora_lead_time_p95_hours", record.get("lead_time_p95_hours"))
-        gauge("dora_fdrt_p50_hours", record.get("fdrt_p50_hours"),
-              record.get("dora_tier_fdrt"))
-        gauge("dora_cfr_pct", record.get("change_failure_rate"),
-              record.get("dora_tier_cfr"))
-        gauge("dora_rework_rate_pct", record.get("rework_rate_pct"),
-              record.get("dora_tier_rework_rate"))
+        gauge("dora_fdrt_p50_hours", record.get("fdrt_p50_hours"), record.get("dora_tier_fdrt"))
+        gauge("dora_cfr_pct", record.get("change_failure_rate"), record.get("dora_tier_cfr"))
+        gauge(
+            "dora_rework_rate_pct",
+            record.get("rework_rate_pct"),
+            record.get("dora_tier_rework_rate"),
+        )
 
         payload = "\n".join(lines)
         job_name = f"ufawkesdora/{tid.replace('/', '_')}"
@@ -564,9 +563,7 @@ async def _push_metrics(
                 url = f"{pushgateway_url.rstrip('/')}/metrics/job/{job_name}"
                 async with session.put(url, data=payload) as resp:
                     if resp.status not in (200, 202):
-                        logger.warning(
-                            "Pushgateway returned %d for %s", resp.status, job_name
-                        )
+                        logger.warning("Pushgateway returned %d for %s", resp.status, job_name)
                     else:
                         logger.debug("Pushed metrics for %s", tid)
         except Exception as e:
@@ -581,23 +578,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Compute DORA delivery metrics from PostgreSQL/TimescaleDB",
     )
     parser.add_argument(
-        "--window", "-w",
+        "--window",
+        "-w",
         type=int,
         default=30,
         help="Number of days to look back (default: 30)",
     )
     parser.add_argument(
-        "--team", "-t",
+        "--team",
+        "-t",
         default=None,
         help="Team/repo filter (default: all teams)",
     )
     parser.add_argument(
-        "--pushgateway", "-p",
+        "--pushgateway",
+        "-p",
         default=None,
         help="Prometheus pushgateway URL (e.g. http://localhost:9091)",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         help="Enable debug logging",
     )
@@ -637,12 +638,32 @@ def _print_table(results: list[dict]):
     print("-" * len(header))
 
     for r in results:
-        df = f"{r.get('deployment_frequency', 0):.2f}" if r.get('deployment_frequency') is not None else "N/A"
-        lt_p50 = f"{r.get('lead_time_p50_hours', 0):.1f}" if r.get('lead_time_p50_hours') is not None else "N/A"
-        lt_p95 = f"{r.get('lead_time_p95_hours', 0):.1f}" if r.get('lead_time_p95_hours') is not None else "N/A"
-        fdrt = f"{r.get('fdrt_p50_hours', 0):.1f}" if r.get('fdrt_p50_hours') is not None else "N/A"
-        cfr = f"{r.get('change_failure_rate', 0)*100:.1f}" if r.get('change_failure_rate') is not None else "N/A"
-        rr = f"{r.get('rework_rate_pct', 0)*100:.1f}" if r.get('rework_rate_pct') is not None else "N/A"
+        df = (
+            f"{r.get('deployment_frequency', 0):.2f}"
+            if r.get("deployment_frequency") is not None
+            else "N/A"
+        )
+        lt_p50 = (
+            f"{r.get('lead_time_p50_hours', 0):.1f}"
+            if r.get("lead_time_p50_hours") is not None
+            else "N/A"
+        )
+        lt_p95 = (
+            f"{r.get('lead_time_p95_hours', 0):.1f}"
+            if r.get("lead_time_p95_hours") is not None
+            else "N/A"
+        )
+        fdrt = f"{r.get('fdrt_p50_hours', 0):.1f}" if r.get("fdrt_p50_hours") is not None else "N/A"
+        cfr = (
+            f"{r.get('change_failure_rate', 0)*100:.1f}"
+            if r.get("change_failure_rate") is not None
+            else "N/A"
+        )
+        rr = (
+            f"{r.get('rework_rate_pct', 0)*100:.1f}"
+            if r.get("rework_rate_pct") is not None
+            else "N/A"
+        )
         tier = r.get("dora_tier_deployment_frequency", "N/A")
         print(
             f"{r['team_id']:<30} {df:<10} {lt_p50:<10} {lt_p95:<10} "

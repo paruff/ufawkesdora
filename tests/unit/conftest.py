@@ -1,9 +1,8 @@
 """Shared test fixtures for uFawkesDORA unit tests."""
 
-import os
-import pytest
-import yaml
 from pathlib import Path
+
+import pytest
 
 
 @pytest.fixture

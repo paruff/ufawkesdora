@@ -8,12 +8,11 @@ Tests cover:
 """
 
 import asyncio
-from unittest.mock import ANY, AsyncMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from ingestion.processor.worker import MAX_ATTEMPTS, process_event, run_worker_loop
-
 
 # ── Fixtures ───────────────────────────────────────────────────────────────────
 
@@ -48,9 +47,11 @@ class TestProcessEvent:
     @pytest.mark.asyncio
     async def test_deployment_success(self, deployment_event):
         """AC: Successful deployment → written to raw_events, marked done."""
-        with patch("ingestion.processor.worker.write_raw_event") as mock_write, \
-             patch("ingestion.processor.worker.mark_done") as mock_done, \
-             patch("ingestion.processor.worker.mark_failed") as mock_fail:
+        with (
+            patch("ingestion.processor.worker.write_raw_event") as mock_write,
+            patch("ingestion.processor.worker.mark_done") as mock_done,
+            patch("ingestion.processor.worker.mark_failed") as mock_fail,
+        ):
             result = await process_event(deployment_event)
             assert result is True
             mock_write.assert_awaited_once_with(
@@ -79,9 +80,11 @@ class TestProcessEvent:
             "source": "org/repo",
             "attempts": 0,
         }
-        with patch("ingestion.processor.worker.write_raw_event") as mock_write, \
-             patch("ingestion.processor.worker.mark_done") as mock_done, \
-             patch("ingestion.processor.worker.mark_failed") as mock_fail:
+        with (
+            patch("ingestion.processor.worker.write_raw_event") as mock_write,
+            patch("ingestion.processor.worker.mark_done") as mock_done,
+            patch("ingestion.processor.worker.mark_failed"),
+        ):
             result = await process_event(event)
             assert result is True
             mock_write.assert_awaited_once_with(
@@ -109,9 +112,11 @@ class TestProcessEvent:
             "source": "org/repo",
             "attempts": 0,
         }
-        with patch("ingestion.processor.worker.write_raw_event") as mock_write, \
-             patch("ingestion.processor.worker.mark_done") as mock_done, \
-             patch("ingestion.processor.worker.mark_failed") as mock_fail:
+        with (
+            patch("ingestion.processor.worker.write_raw_event") as mock_write,
+            patch("ingestion.processor.worker.mark_done"),
+            patch("ingestion.processor.worker.mark_failed"),
+        ):
             result = await process_event(event)
             assert result is True
             mock_write.assert_awaited_once_with(
@@ -139,9 +144,11 @@ class TestProcessEvent:
             "source": "org/repo",
             "attempts": 0,
         }
-        with patch("ingestion.processor.worker.write_raw_event") as mock_write, \
-             patch("ingestion.processor.worker.mark_done") as mock_done, \
-             patch("ingestion.processor.worker.mark_failed") as mock_fail:
+        with (
+            patch("ingestion.processor.worker.write_raw_event") as mock_write,
+            patch("ingestion.processor.worker.mark_done"),
+            patch("ingestion.processor.worker.mark_failed"),
+        ):
             await process_event(event)
             mock_write.assert_awaited_once_with(
                 event_queue_id=5,
@@ -155,9 +162,11 @@ class TestProcessEvent:
     @pytest.mark.asyncio
     async def test_failure_increments_attempts(self, deployment_event):
         """AC: When event processing raises, mark_failed is called."""
-        with patch("ingestion.processor.worker.write_raw_event", side_effect=ValueError("DB error")) as mock_write, \
-             patch("ingestion.processor.worker.mark_done") as mock_done, \
-             patch("ingestion.processor.worker.mark_failed") as mock_fail:
+        with (
+            patch("ingestion.processor.worker.write_raw_event", side_effect=ValueError("DB error")),
+            patch("ingestion.processor.worker.mark_done") as mock_done,
+            patch("ingestion.processor.worker.mark_failed") as mock_fail,
+        ):
             result = await process_event(deployment_event)
             assert result is False
             mock_fail.assert_awaited_once_with(1, max_attempts=MAX_ATTEMPTS)
@@ -178,9 +187,11 @@ class TestProcessEvent:
             "source": "org/repo",
             "attempts": 0,
         }
-        with patch("ingestion.processor.worker.write_raw_event") as mock_write, \
-             patch("ingestion.processor.worker.mark_done") as mock_done, \
-             patch("ingestion.processor.worker.mark_failed") as mock_fail:
+        with (
+            patch("ingestion.processor.worker.write_raw_event") as mock_write,
+            patch("ingestion.processor.worker.mark_done"),
+            patch("ingestion.processor.worker.mark_failed"),
+        ):
             await process_event(event)
             mock_write.assert_awaited_once_with(
                 event_queue_id=6,
@@ -206,9 +217,11 @@ class TestProcessEvent:
             "source": "org/repo",
             "attempts": 0,
         }
-        with patch("ingestion.processor.worker.write_raw_event") as mock_write, \
-             patch("ingestion.processor.worker.mark_done") as mock_done, \
-             patch("ingestion.processor.worker.mark_failed") as mock_fail:
+        with (
+            patch("ingestion.processor.worker.write_raw_event") as mock_write,
+            patch("ingestion.processor.worker.mark_done"),
+            patch("ingestion.processor.worker.mark_failed"),
+        ):
             await process_event(event)
             mock_write.assert_awaited_once_with(
                 event_queue_id=7,
@@ -229,12 +242,18 @@ class TestWorkerLoop:
     @pytest.mark.asyncio
     async def test_loop_processes_event_and_stops_on_shutdown(self, deployment_event):
         """Worker processes one event, then stops when shutdown_event is set."""
-        with patch("ingestion.processor.worker.dequeue_next",
-                   new_callable=AsyncMock,
-                   side_effect=[deployment_event, None, None]), \
-             patch("ingestion.processor.worker.process_event",
-                   new_callable=AsyncMock,
-                   return_value=True):
+        with (
+            patch(
+                "ingestion.processor.worker.dequeue_next",
+                new_callable=AsyncMock,
+                side_effect=[deployment_event, None, None],
+            ),
+            patch(
+                "ingestion.processor.worker.process_event",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+        ):
             shutdown = asyncio.Event()
 
             async def _schedule_shutdown():
@@ -252,9 +271,11 @@ class TestWorkerLoop:
     @pytest.mark.asyncio
     async def test_loop_handles_empty_queue(self):
         """Worker sleeps and retries when queue is empty."""
-        with patch("ingestion.processor.worker.dequeue_next",
-                   new_callable=AsyncMock,
-                   side_effect=[None, None, None]) as mock_dequeue:
+        with patch(
+            "ingestion.processor.worker.dequeue_next",
+            new_callable=AsyncMock,
+            side_effect=[None, None, None],
+        ) as mock_dequeue:
             shutdown = asyncio.Event()
 
             async def _schedule_shutdown():
@@ -276,12 +297,18 @@ class TestWorkerLoop:
         """The on_event callback is invoked after each processed event."""
         callback = AsyncMock()
 
-        with patch("ingestion.processor.worker.dequeue_next",
-                   new_callable=AsyncMock,
-                   side_effect=[deployment_event, None]), \
-             patch("ingestion.processor.worker.process_event",
-                   new_callable=AsyncMock,
-                   return_value=True):
+        with (
+            patch(
+                "ingestion.processor.worker.dequeue_next",
+                new_callable=AsyncMock,
+                side_effect=[deployment_event, None],
+            ),
+            patch(
+                "ingestion.processor.worker.process_event",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+        ):
             shutdown = asyncio.Event()
 
             async def _schedule_shutdown():
@@ -312,12 +339,26 @@ class TestSkipLocked:
     @pytest.mark.asyncio
     async def test_dequeue_returns_unique_events(self):
         """dequeue_next should only return each event once (mocked)."""
-        event_a = {"id": 1, "payload": {}, "event_type": "deployment", "source": "repo", "attempts": 0}
-        event_b = {"id": 2, "payload": {}, "event_type": "deployment", "source": "repo", "attempts": 0}
+        event_a = {
+            "id": 1,
+            "payload": {},
+            "event_type": "deployment",
+            "source": "repo",
+            "attempts": 0,
+        }
+        event_b = {
+            "id": 2,
+            "payload": {},
+            "event_type": "deployment",
+            "source": "repo",
+            "attempts": 0,
+        }
 
-        with patch("ingestion.processor.worker.dequeue_next",
-                   new_callable=AsyncMock,
-                   side_effect=[event_a, event_b, None]) as mock_dequeue:
+        with patch(
+            "ingestion.processor.worker.dequeue_next",
+            new_callable=AsyncMock,
+            side_effect=[event_a, event_b, None],
+        ) as mock_dequeue:
             results = []
 
             # Consume events from the mocked dequeue
@@ -331,13 +372,27 @@ class TestSkipLocked:
     @pytest.mark.asyncio
     async def test_skip_locked_prevents_duplicate_claims(self):
         """Two concurrent workers dequeue different events (mocked)."""
-        event_a = {"id": 1, "payload": {}, "event_type": "deployment", "source": "repo", "attempts": 0}
-        event_b = {"id": 2, "payload": {}, "event_type": "deployment", "source": "repo", "attempts": 0}
+        event_a = {
+            "id": 1,
+            "payload": {},
+            "event_type": "deployment",
+            "source": "repo",
+            "attempts": 0,
+        }
+        event_b = {
+            "id": 2,
+            "payload": {},
+            "event_type": "deployment",
+            "source": "repo",
+            "attempts": 0,
+        }
 
         # Provide enough side_effect values for two workers polling for 0.4s
-        with patch("ingestion.processor.worker.dequeue_next",
-                   new_callable=AsyncMock,
-                   side_effect=[event_a, event_b] + [None] * 50) as mock_dequeue:
+        with patch(
+            "ingestion.processor.worker.dequeue_next",
+            new_callable=AsyncMock,
+            side_effect=[event_a, event_b] + [None] * 50,
+        ) as mock_dequeue:
             shutdown = asyncio.Event()
             seen = set()
 

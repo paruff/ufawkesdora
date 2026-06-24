@@ -14,20 +14,16 @@ a running TimescaleDB instance. Integration tests with a real DB
 are in test_compute_integration.py (requires Docker).
 """
 
-import json
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from compute.metrics import (
-    MetricsDB,
-    classify_tier,
-    compute_all_metrics,
     _merge_team_results,
     _push_metrics,
+    classify_tier,
     parse_args,
 )
-
 
 # ── Tests: DORA Tier Classification ────────────────────────────────────────────
 
