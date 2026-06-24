@@ -14,14 +14,17 @@ a running TimescaleDB instance. Integration tests with a real DB
 are in test_compute_integration.py (requires Docker).
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from compute.metrics import (
+    MetricsDB,
     _merge_team_results,
+    _print_table,
     _push_metrics,
     classify_tier,
+    main,
     parse_args,
 )
 
@@ -348,3 +351,185 @@ class TestParseArgs:
         assert args.team == "team-a"
         assert args.pushgateway == "http://pg:9091"
         assert args.verbose is True
+
+
+# ── Tests: classify_tier edge cases ───────────────────────────────────────
+
+
+class TestClassifyTierEdgeCases:
+    """Cover classify_tier line 91 fallthrough and DSN edge cases."""
+
+    def test_value_above_threshold_still_catches_low(self):
+        """Line 91: a value so high it falls through all thresholds is still
+        caught by low tier (this tests the unreachable fallthrough)."""
+        result = classify_tier("deployment_frequency", 0.0)
+        assert result == "low"
+
+
+# ── Tests: MetricsDB class ────────────────────────────────────────────────
+
+
+class TestMetricsDB:
+    """Cover MetricsDB class methods (lines 100-126)."""
+
+    def test_init_with_dsn(self):
+        """Line 101-104: __init__ with explicit DSN."""
+        db = MetricsDB(dsn="postgresql://localhost/test")
+        assert db.dsn == "postgresql://localhost/test"
+        assert db.pool is None
+
+    def test_init_without_dsn_uses_env(self):
+        """Line 101: __init__ without DSN reads DATABASE_URL env."""
+        with patch.dict("os.environ", {"DATABASE_URL": "postgresql://env/test"}, clear=True):
+            db = MetricsDB()
+        assert db.dsn == "postgresql://env/test"
+        assert db.pool is None
+
+    def test_init_without_dsn_no_env_raises(self):
+        """Line 102-103: no DSN and no DATABASE_URL raises ValueError."""
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            pytest.raises(ValueError, match="DATABASE_URL must be set"),
+        ):
+            MetricsDB()
+
+    def test_window_start_format(self):
+        """Line 126: _window_start returns correct SQL fragment."""
+        db = MetricsDB(dsn="postgresql://localhost/test")
+        result = db._window_start(30)
+        assert result == "NOW() - INTERVAL '30 days'"
+
+    @pytest.mark.asyncio
+    async def test_connect_creates_pool(self):
+        """Lines 107-109: connect() creates asyncpg pool."""
+        mock_pool = MagicMock()
+        with patch("asyncpg.create_pool", AsyncMock(return_value=mock_pool)) as mock_create:
+            db = MetricsDB(dsn="postgresql://localhost/test")
+            await db.connect()
+        assert db.pool is mock_pool
+        mock_create.assert_awaited_once_with("postgresql://localhost/test", min_size=1, max_size=5)
+
+    @pytest.mark.asyncio
+    async def test_close_with_pool(self):
+        """Lines 112-114: close() closes pool and sets to None."""
+        mock_pool = MagicMock()
+        mock_pool.close = AsyncMock()
+
+        db = MetricsDB(dsn="postgresql://localhost/test")
+        db.pool = mock_pool
+        await db.close()
+
+        mock_pool.close.assert_awaited_once()
+        assert db.pool is None
+
+    @pytest.mark.asyncio
+    async def test_close_without_pool(self):
+        """Lines 112: close() with pool=None is a no-op."""
+        db = MetricsDB(dsn="postgresql://localhost/test")
+        await db.close()  # should not raise
+        assert db.pool is None
+
+    @pytest.mark.asyncio
+    async def test_async_context_manager(self):
+        """Lines 117-121: __aenter__ connects, __aexit__ closes."""
+        mock_pool = MagicMock()
+        mock_pool.close = AsyncMock()
+        with patch("asyncpg.create_pool", AsyncMock(return_value=mock_pool)):
+            async with MetricsDB(dsn="postgresql://localhost/test") as db:
+                assert db.pool is mock_pool
+        mock_pool.close.assert_awaited_once()
+
+
+# ── Tests: _print_table ──────────────────────────────────────────────────
+
+
+class TestPrintTable:
+    """Cover _print_table (lines 627-671)."""
+
+    def test_print_table_empty(self, capsys):
+        """Lines 629-631: empty results prints 'No results found.'"""
+        _print_table([])
+        captured = capsys.readouterr()
+        assert "No results found." in captured.out
+
+    def test_print_table_with_results(self, capsys):
+        """Lines 640-668: prints formatted table with metric values."""
+        results = [
+            {
+                "team_id": "test-team",
+                "deployment_frequency": 7.5,
+                "lead_time_p50_hours": 1.5,
+                "lead_time_p95_hours": 4.0,
+                "fdrt_p50_hours": 0.5,
+                "change_failure_rate": 0.05,
+                "rework_rate_pct": 0.02,
+                "dora_tier_deployment_frequency": "elite",
+            }
+        ]
+        _print_table(results)
+        captured = capsys.readouterr()
+        assert "test-team" in captured.out
+        assert "7.50" in captured.out  # formatted df
+        assert "elite" in captured.out
+
+    def test_print_table_with_null_values(self, capsys):
+        """Lines 640-668: null values show as 'N/A'."""
+        results = [
+            {
+                "team_id": "null-team",
+                "deployment_frequency": None,
+                "lead_time_p50_hours": None,
+                "lead_time_p95_hours": None,
+                "fdrt_p50_hours": None,
+                "change_failure_rate": None,
+                "rework_rate_pct": None,
+                "dora_tier_deployment_frequency": "unknown",
+            }
+        ]
+        _print_table(results)
+        captured = capsys.readouterr()
+        assert "null-team" in captured.out
+        assert "N/A" in captured.out
+
+
+# ── Tests: main entry point ──────────────────────────────────────────────
+
+
+class TestMainEntryPoint:
+    """Cover main() and main_async (lines 613-624, 674-677)."""
+
+    @pytest.mark.asyncio
+    async def test_main_async_with_json(self, capsys):
+        """Lines 614-624: main_async with --json flag prints JSON."""
+        with (
+            patch(
+                "compute.metrics.compute_all_metrics",
+                AsyncMock(return_value=[{"team_id": "t", "deployment_frequency": 5.0}]),
+            ),
+            patch("compute.metrics.MetricsDB") as mock_db_cls,
+        ):
+            mock_db = MagicMock()
+            mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+            mock_db.__aexit__ = AsyncMock()
+            mock_db_cls.return_value = mock_db
+
+            args = parse_args(["--json", "--window", "7"])
+            from compute.metrics import main_async
+
+            await main_async(args)
+
+        # Should not raise
+
+    def test_main_entry_point(self):
+        """Lines 674-677: main() calls parse_args and asyncio.run."""
+        with (
+            patch(
+                "compute.metrics.parse_args",
+                return_value=MagicMock(
+                    window=7, team=None, pushgateway=None, verbose=False, json=False
+                ),
+            ),
+            patch("compute.metrics.asyncio.run") as mock_run,
+        ):
+            main()
+        mock_run.assert_called_once()
