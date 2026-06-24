@@ -67,13 +67,13 @@ def find_repo_root() -> Path:
 
 def execute_sql_file(cursor, filepath: Path):
     """Read and execute a SQL file via psycopg2."""
-    from tests.unit.test_schema import execute_sql_file as _execute
+    from tests.integration.test_schema import execute_sql_file as _execute
 
     _execute(cursor, filepath)
 
 
 def split_sql_statements(sql: str) -> list[str]:
-    from tests.unit.test_schema import split_sql_statements as _split
+    from tests.integration.test_schema import split_sql_statements as _split
 
     return _split(sql)
 
@@ -112,7 +112,7 @@ def _switch_db(url: str, dbname: str) -> str:
 @pytest.fixture(scope="module")
 def db_url(postgres_container, schema_dir) -> str:
     """Apply init scripts, migrations, and fixture data. Return connection URL."""
-    from tests.unit.test_schema import _bootstrap_databases_and_roles
+    from tests.integration.test_schema import _bootstrap_databases_and_roles
 
     # 1. Bootstrap databases and roles
     conn = psycopg2.connect(_clean_url(postgres_container.get_connection_url()))

@@ -1,26 +1,21 @@
-# CI Diagnosis
+# CI Diagnosis — PR #7
 
-```
-Failure:      CI Validate job (pre-commit hooks)
-Location:     .github/workflows/ci.yml — Run pre-commit hooks step
-Evidence:
-              pre-commit run --all-files fails with exit code 1 due to:
-              1. end-of-file-fixer — missing trailing newlines in 4 files
-              2. markdownlint — formatting issues in design.md, tasks.json, specification.md, events/README.md
-              3. prettier — formatting issues in same 4 files
-              4. detect-secrets — 8 false positive flaggings:
-                 - 4x secret keyword 'change_me_in_production' (placeholder pw)
-                 - 3x hex high entropy 'a1b2c3...' (test SHAs)
-                 - 1x basic auth credentials (local dev DSN)
+## Failure 1: Unit Tests
 
-              GitGuardian Security Checks also FAILED (likely same false positives)
+| Field        | Value                                                                                                                                                                                                    |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Failure      | Tests / Unit Tests                                                                                                                                                                                       |
+| Job          | unit-tests in ci-tests.yml                                                                                                                                                                               |
+| Evidence     | `ImportError while loading conftest '/home/runner/work/ufawkesdora/ufawkesdora/tests/unit/conftest.py'. tests/unit/conftest.py:5: in <module> import yaml E ModuleNotFoundError: No module named 'yaml'` |
+| Likely Cause | `ci-tests.yml` install step (`Install test dependencies`) does not include `pyyaml`. The `conftest.py` imports `yaml` for parsing workflow YAML files.                                                   |
+| Confidence   | HIGH                                                                                                                                                                                                     |
 
-Likely Cause: Pre-commit auto-fix hooks (end-of-file-fixer, markdownlint, prettier) exit
-              with code 1 after modifying files; .secrets.baseline doesn't cover the
-              false positive patterns present in this branch's codebase.
+## Failure 2: Integration Tests
 
-Confidence:   HIGH
-Proposed Fix: 1. Run pre-commit auto-fix hooks, commit the formatting changes
-              2. Update .secrets.baseline with canonical false positives
-              3. Fix the local-dev DSN in compute/metrics.py to avoid basic-auth pattern
-```
+| Field        | Value                                                                                                                                                                                                                                                                 |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Failure      | Tests / Integration Tests                                                                                                                                                                                                                                             |
+| Job          | integration-tests in ci-tests.yml                                                                                                                                                                                                                                     |
+| Evidence     | `ERROR at setup of TestMetricsIntegration.test_all_five_metrics_computed: ModuleNotFoundError: No module named 'tests.unit.test_schema'`                                                                                                                              |
+| Likely Cause | `test_metrics_integration.py` imports helper functions (`execute_sql_file`, `split_sql_statements`, `_bootstrap_databases_and_roles`) from `tests.unit.test_schema`. The `PYTHONPATH` doesn't include the project root, so the `tests.unit` package isn't resolvable. |
+| Confidence   | HIGH                                                                                                                                                                                                                                                                  |

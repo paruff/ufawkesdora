@@ -106,9 +106,8 @@ def test_e2e_full_pipeline():
         "environment": "production",
         "commit_sha": "a" * 40,
         "status": "success",
-        "occurred_at": "2026-06-23T12:00:00Z",
         "deployed_at": "2026-06-23T12:00:00Z",
-        "team_id": "e2e-test-team",
+        "pipeline_url": "https://github.com/paruff/ufawkesdora/actions/runs/1",
     }
     resp = _post_event(deploy_payload)
     print(f"[e2e] Deployment event queued: {resp}")
@@ -137,11 +136,13 @@ def test_e2e_full_pipeline():
     print(f"[e2e] {event_count} raw events found (expected >= 2)")
 
     # ── Step 4: Run compute and verify snapshot ─────────────────────────────
-    snapshot = _run_compute(window_days=7)
-    print(f"[e2e] Compute result: {json.dumps(snapshot, indent=2)}")
+    snapshots = _run_compute(window_days=7)
+    print(f"[e2e] Compute result: {json.dumps(snapshots, indent=2)}")
 
-    assert "deployment_frequency" in snapshot, "Missing deployment_frequency"
-    assert snapshot.get("change_failure_rate") is not None, "Missing change_failure_rate"
+    assert len(snapshots) >= 1, "Expected at least one snapshot row"
+    row = snapshots[0]
+    assert row.get("deployment_frequency") is not None, "Missing deployment_frequency"
+    assert row.get("change_failure_rate") is not None, "Missing change_failure_rate"
     print("[e2e] ✅ Full pipeline validated: event → raw_events → dora_snapshots")
 
 

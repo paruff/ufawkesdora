@@ -197,6 +197,7 @@ jobs:
 
           sensitive_key_regex='(SECRET|TOKEN|PASSWORD|PRIVATE_KEY|ACCESS_KEY|API_KEY|DATABASE_URL|CONN_STRING|DSN)'
           placeholder_value_regex='^(|<.*>|REDACTED|CHANGEME|changeme|REPLACE_ME|example|your_.*)$'
+          template_var_regex='\$\{?[A-Z_][A-Z0-9_]*\}?'
 
           while IFS= read -r line || [ -n "$line" ]; do
             trimmed="$(printf '%s' "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
@@ -209,8 +210,14 @@ jobs:
             value="${trimmed#*=}"
 
             if printf '%s\n' "$key" | grep -Eiq "$sensitive_key_regex"; then
-              if ! printf '%s\n' "$value" | grep -Eq "$placeholder_value_regex"; then
+              if printf '%s\n' "$value" | grep -Eq "$placeholder_value_regex"; then
+                :  # Known placeholder pattern — OK
+              elif printf '%s\n' "$value" | grep -Eq "$template_var_regex"; then
+                :  # Uses environment variable template — OK (e.g., ${PASSWORD}, $TOKEN)
+              else
                 echo "❌ Concrete value detected for sensitive key '$key' in .env.example"
+                echo "   Value: $value"
+                echo "   Allowed: empty, <placeholder>, REDACTED, CHANGEME, \${VAR} templates"
                 exit 1
               fi
             fi

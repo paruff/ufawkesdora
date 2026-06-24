@@ -12,7 +12,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from ingestion.processor.worker import MAX_ATTEMPTS, process_event, run_worker_loop
+from ingestion.processor.worker import (
+    MAX_ATTEMPTS,
+    _extract_outcome,
+    process_event,
+    run_worker_loop,
+)
 
 # ── Fixtures ───────────────────────────────────────────────────────────────────
 
@@ -412,3 +417,57 @@ class TestSkipLocked:
 
             await asyncio.gather(worker(1), worker(2), stop())
             assert seen == {1, 2}
+
+
+class TestReworkOutcomeMapping:
+    """Cover _extract_outcome with rework and unknown event types (lines 54-56)."""
+
+    def test_rework_event_maps_to_success(self):
+        """Lines 54-55: rework events always map to 'success'."""
+        result = _extract_outcome({"event_type": "rework", "status": "hotfix"})
+        assert result == "success"
+
+    def test_rework_event_ignores_status(self):
+        """Lines 54-55: rework maps to success regardless of status."""
+        result = _extract_outcome({"event_type": "rework", "status": "rollback"})
+        assert result == "success"
+
+    def test_unknown_event_type_returns_unknown(self):
+        """Line 56: unrecognized event type returns 'unknown'."""
+        result = _extract_outcome({"event_type": "unknown_type", "status": "something"})
+        assert result == "unknown"
+
+    def test_missing_event_type_returns_unknown(self):
+        """Line 56: missing event_type key returns 'unknown'."""
+        result = _extract_outcome({"status": "success"})
+        assert result == "unknown"
+
+
+class TestMainEntryPoint:
+    """Cover the main() entry point (lines 143-163)."""
+
+    def test_main_is_callable(self):
+        """Line 163: verify main is callable (the __main__ guard)."""
+        from ingestion.processor.worker import main
+
+        assert callable(main)
+
+    def test_main_runs_via_asyncio_run(self):
+        """Lines 145-159: main() invokes asyncio.run with _run coroutine."""
+        with (
+            patch("ingestion.processor.worker.get_pool", AsyncMock()),
+            patch("ingestion.processor.worker.run_worker_loop", AsyncMock()),
+            patch("ingestion.processor.worker.close_pool", AsyncMock()),
+            patch("ingestion.processor.worker.asyncio.run") as mock_asyncio_run,
+            patch.dict("os.environ", {"DATABASE_URL": "postgresql://localhost/test"}, clear=True),
+        ):
+            from ingestion.processor.worker import main
+
+            main()
+
+        mock_asyncio_run.assert_called_once()
+        # Verify it was called with a coroutine (the _run function)
+        call_arg = mock_asyncio_run.call_args[0][0]
+        import asyncio
+
+        assert asyncio.iscoroutine(call_arg)
