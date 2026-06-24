@@ -1,0 +1,96 @@
+name: Documentation Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  required-files:
+    name: Required files present
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required files exist and are not placeholders
+        run: |
+          FAIL=0
+
+          # Required files
+          for f in README.md CHANGELOG.md CONTRIBUTING.md LICENSE; do
+            if [ ! -f "$f" ]; then
+              echo "❌ MISSING: $f"
+              FAIL=1
+            fi
+          done
+
+          # AI_STANCE.md — required for uFawkesAI suite repos
+          if [ ! -f "AI_STANCE.md" ]; then
+            echo "❌ MISSING: AI_STANCE.md"
+            FAIL=1
+          fi
+
+          # AGENTS.md — required if .agents/ exists
+          if [ -d ".agents" ] && [ ! -f "AGENTS.md" ]; then
+            echo "❌ MISSING: AGENTS.md (required when .agents/ exists)"
+            FAIL=1
+          fi
+
+          # Architecture doc — either location
+          if [ ! -f "ARCHITECTURE.md" ] && [ ! -f "docs/ARCHITECTURE.md" ]; then
+            echo "⚠  WARNING: ARCHITECTURE.md not found (check docs/ too)"
+          fi
+
+          # tests/README.md
+          if [ ! -f "tests/README.md" ]; then
+            echo "⚠  WARNING: tests/README.md not found"
+          fi
+
+          # Placeholder check
+          if grep -rn "\[Add contribution guidelines here\]" --include="*.md" . | grep -v ".git"; then
+            echo "❌ CONTRIBUTING.md is still a placeholder"
+            FAIL=1
+          fi
+
+          if grep -rn "CONFIRM_VARIANT" --include="*.md" . | grep -v ".git"; then
+            echo "❌ Unresolved CONFIRM_VARIANT placeholder in markdown files"
+            FAIL=1
+          fi
+
+          # README required sections
+          for section in "## Status" "## Quick Start\|Getting Started\|## Install" "## Test"; do
+            if ! grep -qE "$section" README.md; then
+              echo "⚠  WARNING: README.md may be missing section: $section"
+            fi
+          done
+
+          exit $FAIL
+
+  markdown-lint:
+    name: Markdown lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DavidAnson/markdownlint-cli2-action@v16
+        with:
+          globs: "**/*.md"
+          config: ".markdownlint.json"
+
+  link-check:
+    name: Check links
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          args: >
+            --no-progress
+            --exclude-all-private
+            --exclude 'localhost'
+            --exclude '0\.0\.0\.0'
+            --exclude 'example\.com'
+            '**/*.md'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
