@@ -1,4 +1,4 @@
-.PHONY: help test test-unit test-integration test-all validate pre-commit-setup pre-commit-run clean
+.PHONY: help test test-unit test-integration test-all test-smoke test-e2e coverage-gate validate pre-commit-setup pre-commit-run clean compose-up compose-down
 
 help: ## Show this help message
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -25,6 +25,55 @@ test-integration: ## Run integration tests (requires Docker)
 
 test-all: test-unit test-integration ## Run all tests (unit + integration)
 
+coverage-gate: ## Run unit tests with coverage gate (80% min)
+	$(PYTEST) tests/unit/ -v --tb=short \
+		--cov=compute --cov=ingestion --cov-report=term-missing \
+		--cov-fail-under=80
+
+# ============================================================================
+# Smoke / E2E Test Commands (requires Docker)
+# ============================================================================
+
+test-smoke: ## Run smoke tests against docker-compose.test.yml stack
+	DOCKER_HOST="unix:///Users/philruff/.docker/run/docker.sock" \
+	docker compose -f docker-compose.test.yml up -d --build
+	@echo "Waiting for API health..."
+	@for i in $$(seq 1 20); do \
+		if curl -s -o /dev/null -w '%{http_code}' http://localhost:8089/health 2>/dev/null | grep -q 200; then \
+			echo "API ready (attempt $$i)"; \
+			break; \
+		fi; \
+		sleep 3; \
+	done
+	@curl -s http://localhost:8089/health | python3 -c "import sys, json; d=json.load(sys.stdin); assert d.get('status') == 'ok', f'Expected ok, got {d}'"
+	@echo "✅ Smoke test passed"
+	@DOCKER_HOST="unix:///Users/philruff/.docker/run/docker.sock" \
+	docker compose -f docker-compose.test.yml down -v
+
+test-e2e: ## Run E2E flow test against docker-compose.test.yml stack
+	DOCKER_HOST="unix:///Users/philruff/.docker/run/docker.sock" \
+	docker compose -f docker-compose.test.yml up -d --build
+	@echo "Waiting for E2E stack..."
+	@for i in $$(seq 1 20); do \
+		if curl -s -o /dev/null -w '%{http_code}' http://localhost:8089/health 2>/dev/null | grep -q 200; then \
+			echo "API ready (attempt $$i)"; \
+			break; \
+		fi; \
+		sleep 3; \
+	done
+	$(PYTEST) tests/integration/test_e2e_flow.py -v --tb=short
+	@echo "✅ E2E test passed"
+	@DOCKER_HOST="unix:///Users/philruff/.docker/run/docker.sock" \
+	docker compose -f docker-compose.test.yml down -v
+
+compose-up: ## Start docker-compose.test.yml stack
+	DOCKER_HOST="unix:///Users/philruff/.docker/run/docker.sock" \
+	docker compose -f docker-compose.test.yml up -d --build
+
+compose-down: ## Tear down docker-compose.test.yml stack
+	DOCKER_HOST="unix:///Users/philruff/.docker/run/docker.sock" \
+	docker compose -f docker-compose.test.yml down -v
+
 # ============================================================================
 # Validation Commands
 # ============================================================================
@@ -42,10 +91,6 @@ pre-commit-setup: ## Install pre-commit hooks
 
 pre-commit-run: ## Run all pre-commit hooks
 	@pre-commit run --all-files
-
-# ============================================================================
-# Cleanup
-# ============================================================================
 
 # ============================================================================
 # Database Commands (local dev with docker-compose.dev.yml)

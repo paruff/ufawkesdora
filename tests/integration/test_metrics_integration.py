@@ -7,7 +7,6 @@ DORA metrics are computed correctly.
 Requires: Docker daemon running.
 """
 
-import re
 from pathlib import Path
 
 import psycopg2
@@ -16,45 +15,44 @@ from testcontainers.postgres import PostgresContainer
 
 from compute.metrics import compute_all_metrics, parse_args
 
-
 # ── Fixture data ───────────────────────────────────────────────────────────────
 
 FIXTURE_TEAM = "test-org/test-service"
 
-FIXTURE_SQL = """
+FIXTURE_SQL = f"""
 -- Fixture: successful deployments (for Deployment Frequency, Lead Time, FDRT)
 INSERT INTO raw_events (event_type, source, outcome, metadata, recorded_at) VALUES
-    ('deployment', '{team}', 'success', '{{"commit_sha": "abc1", "first_commit_at": "2026-06-01T08:00:00Z", "deployed_at": "2026-06-01T10:00:00Z"}}'::jsonb, '2026-06-01T10:00:00Z'),
-    ('deployment', '{team}', 'success', '{{"commit_sha": "abc2", "first_commit_at": "2026-06-03T08:00:00Z", "deployed_at": "2026-06-03T12:00:00Z"}}'::jsonb, '2026-06-03T12:00:00Z'),
-    ('deployment', '{team}', 'success', '{{"commit_sha": "abc3", "first_commit_at": "2026-06-05T08:00:00Z", "deployed_at": "2026-06-05T09:30:00Z"}}'::jsonb, '2026-06-05T09:30:00Z'),
-    ('deployment', '{team}', 'success', '{{"commit_sha": "abc4", "first_commit_at": "2026-06-07T08:00:00Z", "deployed_at": "2026-06-07T11:00:00Z"}}'::jsonb, '2026-06-07T11:00:00Z'),
-    ('deployment', '{team}', 'success', '{{"commit_sha": "abc5", "first_commit_at": "2026-06-10T08:00:00Z", "deployed_at": "2026-06-10T14:00:00Z"}}'::jsonb, '2026-06-10T14:00:00Z'),
-    ('deployment', '{team}', 'success', '{{"commit_sha": "abc6", "first_commit_at": "2026-06-12T08:00:00Z", "deployed_at": "2026-06-12T10:00:00Z"}}'::jsonb, '2026-06-12T10:00:00Z'),
-    ('deployment', '{team}', 'success', '{{"commit_sha": "abc7", "first_commit_at": "2026-06-14T08:00:00Z", "deployed_at": "2026-06-14T16:00:00Z"}}'::jsonb, '2026-06-14T16:00:00Z'),
-    ('deployment', '{team}', 'success', '{{"commit_sha": "abc8", "first_commit_at": "2026-06-16T08:00:00Z", "deployed_at": "2026-06-16T10:30:00Z"}}'::jsonb, '2026-06-16T10:30:00Z');
+    ('deployment', '{FIXTURE_TEAM}', 'success', '{{"commit_sha": "abc1", "first_commit_at": "2026-06-01T08:00:00Z", "deployed_at": "2026-06-01T10:00:00Z"}}'::jsonb, '2026-06-01T10:00:00Z'),
+    ('deployment', '{FIXTURE_TEAM}', 'success', '{{"commit_sha": "abc2", "first_commit_at": "2026-06-03T08:00:00Z", "deployed_at": "2026-06-03T12:00:00Z"}}'::jsonb, '2026-06-03T12:00:00Z'),
+    ('deployment', '{FIXTURE_TEAM}', 'success', '{{"commit_sha": "abc3", "first_commit_at": "2026-06-05T08:00:00Z", "deployed_at": "2026-06-05T09:30:00Z"}}'::jsonb, '2026-06-05T09:30:00Z'),
+    ('deployment', '{FIXTURE_TEAM}', 'success', '{{"commit_sha": "abc4", "first_commit_at": "2026-06-07T08:00:00Z", "deployed_at": "2026-06-07T11:00:00Z"}}'::jsonb, '2026-06-07T11:00:00Z'),
+    ('deployment', '{FIXTURE_TEAM}', 'success', '{{"commit_sha": "abc5", "first_commit_at": "2026-06-10T08:00:00Z", "deployed_at": "2026-06-10T14:00:00Z"}}'::jsonb, '2026-06-10T14:00:00Z'),
+    ('deployment', '{FIXTURE_TEAM}', 'success', '{{"commit_sha": "abc6", "first_commit_at": "2026-06-12T08:00:00Z", "deployed_at": "2026-06-12T10:00:00Z"}}'::jsonb, '2026-06-12T10:00:00Z'),
+    ('deployment', '{FIXTURE_TEAM}', 'success', '{{"commit_sha": "abc7", "first_commit_at": "2026-06-14T08:00:00Z", "deployed_at": "2026-06-14T16:00:00Z"}}'::jsonb, '2026-06-14T16:00:00Z'),
+    ('deployment', '{FIXTURE_TEAM}', 'success', '{{"commit_sha": "abc8", "first_commit_at": "2026-06-16T08:00:00Z", "deployed_at": "2026-06-16T10:30:00Z"}}'::jsonb, '2026-06-16T10:30:00Z');
 
 -- Fixture: failed deployment followed by successful recovery (for FDRT)
 INSERT INTO raw_events (event_type, source, outcome, metadata, recorded_at) VALUES
-    ('deployment', '{team}', 'failure', '{{"commit_sha": "fail1", "first_commit_at": "2026-06-18T08:00:00Z", "deployed_at": "2026-06-18T10:00:00Z"}}'::jsonb, '2026-06-18T10:00:00Z'),
-    ('deployment', '{team}', 'success', '{{"commit_sha": "recovery1", "first_commit_at": "2026-06-18T10:30:00Z", "deployed_at": "2026-06-18T11:00:00Z"}}'::jsonb, '2026-06-18T11:00:00Z');
+    ('deployment', '{FIXTURE_TEAM}', 'failure', '{{"commit_sha": "fail1", "first_commit_at": "2026-06-18T08:00:00Z", "deployed_at": "2026-06-18T10:00:00Z"}}'::jsonb, '2026-06-18T10:00:00Z'),
+    ('deployment', '{FIXTURE_TEAM}', 'success', '{{"commit_sha": "recovery1", "first_commit_at": "2026-06-18T10:30:00Z", "deployed_at": "2026-06-18T11:00:00Z"}}'::jsonb, '2026-06-18T11:00:00Z');
 
 -- Fixture: rollback followed by successful recovery (for FDRT)
 INSERT INTO raw_events (event_type, source, outcome, metadata, recorded_at) VALUES
-    ('deployment', '{team}', 'rollback', '{{"commit_sha": "roll1", "first_commit_at": "2026-06-20T08:00:00Z", "deployed_at": "2026-06-20T10:00:00Z"}}'::jsonb, '2026-06-20T10:00:00Z'),
-    ('deployment', '{team}', 'success', '{{"commit_sha": "recovery2", "first_commit_at": "2026-06-20T12:00:00Z", "deployed_at": "2026-06-20T14:00:00Z"}}'::jsonb, '2026-06-20T14:00:00Z');
+    ('deployment', '{FIXTURE_TEAM}', 'rollback', '{{"commit_sha": "roll1", "first_commit_at": "2026-06-20T08:00:00Z", "deployed_at": "2026-06-20T10:00:00Z"}}'::jsonb, '2026-06-20T10:00:00Z'),
+    ('deployment', '{FIXTURE_TEAM}', 'success', '{{"commit_sha": "recovery2", "first_commit_at": "2026-06-20T12:00:00Z", "deployed_at": "2026-06-20T14:00:00Z"}}'::jsonb, '2026-06-20T14:00:00Z');
 
 -- Fixture: user-visible rework events (for Rework Rate)
 INSERT INTO raw_events (event_type, source, outcome, metadata, recorded_at) VALUES
-    ('rework', '{team}', 'success', '{{"deployment_sha": "abc5", "user_visible": true, "rework_type": "hotfix"}}'::jsonb, '2026-06-11T08:00:00Z');
+    ('rework', '{FIXTURE_TEAM}', 'success', '{{"deployment_sha": "abc5", "user_visible": true, "rework_type": "hotfix"}}'::jsonb, '2026-06-11T08:00:00Z');
 
 -- Fixture: non-user-visible rework (should NOT be counted in rework rate)
 INSERT INTO raw_events (event_type, source, outcome, metadata, recorded_at) VALUES
-    ('rework', '{team}', 'success', '{{"deployment_sha": "abc6", "user_visible": false, "rework_type": "internal"}}'::jsonb, '2026-06-13T08:00:00Z');
+    ('rework', '{FIXTURE_TEAM}', 'success', '{{"deployment_sha": "abc6", "user_visible": false, "rework_type": "internal"}}'::jsonb, '2026-06-13T08:00:00Z');
 
 -- Fixture: another team (to test multi-team aggregation)
 INSERT INTO raw_events (event_type, source, outcome, metadata, recorded_at) VALUES
     ('deployment', 'other-team/other-service', 'success', '{{"commit_sha": "x1", "first_commit_at": "2026-06-01T08:00:00Z", "deployed_at": "2026-06-01T09:00:00Z"}}'::jsonb, '2026-06-01T09:00:00Z');
-""".format(team=FIXTURE_TEAM)
+"""
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -70,11 +68,13 @@ def find_repo_root() -> Path:
 def execute_sql_file(cursor, filepath: Path):
     """Read and execute a SQL file via psycopg2."""
     from tests.unit.test_schema import execute_sql_file as _execute
+
     _execute(cursor, filepath)
 
 
 def split_sql_statements(sql: str) -> list[str]:
     from tests.unit.test_schema import split_sql_statements as _split
+
     return _split(sql)
 
 
@@ -103,6 +103,7 @@ def _clean_url(url: str) -> str:
 
 def _switch_db(url: str, dbname: str) -> str:
     import urllib.parse
+
     url = url.replace("postgresql+psycopg2://", "postgresql://")
     parsed = urllib.parse.urlparse(url)
     return parsed._replace(path=f"/{dbname}").geturl()
@@ -177,9 +178,10 @@ class TestMetricsIntegration:
         """Verify all five DORA metrics are computed from fixture data."""
         # Override DB connection to use the test container
         import os
+
         os.environ["DATABASE_URL"] = db_url
 
-        args = parse_args(["--window", "30", "--team", FIXTURE_TEAM, "--json"])
+        parse_args(["--window", "30", "--team", FIXTURE_TEAM, "--json"])
         results = await compute_all_metrics(
             window_days=30,
             team=FIXTURE_TEAM,
@@ -223,6 +225,7 @@ class TestMetricsIntegration:
     async def test_dora_tier_classification(self, db_url):
         """Verify DORA tier classification matches expected thresholds."""
         import os
+
         os.environ["DATABASE_URL"] = db_url
 
         results = await compute_all_metrics(
@@ -248,6 +251,7 @@ class TestMetricsIntegration:
     async def test_dora_snapshots_written(self, db_url):
         """Verify computed results are written to dora_snapshots table."""
         import os
+
         os.environ["DATABASE_URL"] = db_url
 
         results = await compute_all_metrics(
@@ -290,6 +294,7 @@ class TestMetricsIntegration:
     async def test_multiple_teams(self, db_url):
         """Verify both teams appear in results."""
         import os
+
         os.environ["DATABASE_URL"] = db_url
 
         results = await compute_all_metrics(window_days=30)
@@ -301,6 +306,7 @@ class TestMetricsIntegration:
     async def test_proxy_metrics_flag_false(self, db_url):
         """When first_commit_at is available, proxy_metrics should be False."""
         import os
+
         os.environ["DATABASE_URL"] = db_url
 
         results = await compute_all_metrics(

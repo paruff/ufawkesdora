@@ -1,248 +1,153 @@
-# Design: Resource Plane Postgres Schema with TimescaleDB
+# Design: 5-Stage GitOps-Aligned Engineering Lifecycle Pipeline
 
-## Architecture Overview
+## 1. Architectural Philosophy: The Two-Tier Reusability Model
 
-The data layer for uFawkesDORA follows a **schema-as-code** pattern. All database definitions live in the uFawkesDORA repository as version-controlled SQL scripts. These scripts are bind-mounted into the fawkes resource plane Postgres container at initialization time.
+To satisfy the requirement that this pipeline supports not just `uFawkesDORA` but many other repositories in the `uFawkes` platform suite and beyond, the design is split into two distinct tiers:
+
+1. **The Platform Tier (Reusable Workflows)**:
+
+   - Stateless, generic workflow templates (e.g., `reusable-preflight.yml`, `reusable-lint.yml`, `reusable-security-scanning.yml`, `reusable-dependency-review.yml`, `reusable-build.yml`, and `reusable-tests.yml`).
+   - Standardized inputs and outputs that accept common configuration parameters (e.g., node-version, python-version, folders to scan).
+   - Designed to be maintained once and inherited by all repositories in the suite via GitHub Actions `uses:` statements.
+
+2. **The Repository Tier (Local Concrete Implementation)**:
+   - Local orchestrators (e.g. `ci-pipeline.yml`) that tie the reusable workflows together in a repository-specific DAG (Directed Acyclic Graph).
+   - Repository-specific testing configurations, such as `docker-compose.integration.yml` and `docker-compose.test.yml`, which map the local application architecture.
+   - Fast, local unit tests under `tests/unit` and local integration/E2E playbooks under `tests/integration`.
+
+---
+
+## 2. The 5-Stage Pipeline DAG
+
+The concrete pipeline is structured as an automated, progressive sequence of gates to ensure that failures are caught early (low cost) before triggering intensive test stacks or deployments (high cost).
 
 ```
-uFawkesDORA repo (this repo)
-  │
-  ├── database/init/          # Idempotent init scripts (00, 01, 02)
-  ├── database/timescaledb/   # Hypertable conversion
-  ├── database/migrations/    # Forward-only numbered migrations
-  ├── docker-compose.dev.yml  # Local dev TimescaleDB
-  │
-  └── bind-mount ──► fawkes resource plane container
-                        └── dora_metrics database
-                              ├── event_queue
-                              ├── raw_events (hypertable)
-                              ├── dora_snapshots (hypertable)
-                              ├── archetype_history
-                              ├── wellbeing_surveys
-                              └── vsi_stage_breakdown (hypertable)
+[PR/Push Trigger]
+       │
+       ▼
+┌────────────────────────────────────────────────────────┐
+│ STAGE 1: PRE-COMMIT / PRE-FLIGHT                       │
+│ - reusable-preflight.yml (Conventional Commits, GHA)   │
+│ - local pre-commit hooks (Ruff, Black, Gitleaks, etc.) │
+└──────────────────────┬─────────────────────────────────┘
+                       │ (Pass)
+                       ▼
+┌────────────────────────────────────────────────────────┐
+│ STAGE 2: POST-COMMIT CI (BUILD & STATIC SCANS)         │
+│ - ruff/eslint/golangci-lint (reusable-lint.yml)        │
+│ - trivy/safety/gitleaks (reusable-security-scanning.yml)│
+│ - dependency-review (reusable-dependency-review.yml)   │
+└──────────────────────┬─────────────────────────────────┘
+                       │ (Pass)
+                       ▼
+┌────────────────────────────────────────────────────────┐
+│ STAGE 3: BUILD & COMPILATION                           │
+│ - Docker multi-stage build (reusable-build.yml)        │
+│ - `:latest` tag check                                  │
+└──────────────────────┬─────────────────────────────────┘
+                       │ (Pass)
+                       ▼
+┌────────────────────────────────────────────────────────┐
+│ STAGE 4: PRE-DEPLOYMENT VALIDATION (ISOLATED STACKS)    │
+│ - Fast unit tests (no Docker)                          │
+│ - Start integration stack (docker-compose.integration) │
+│ - Real database schema tests (test_schema.py)          │
+│ - Curl smoke test retry loop against `/health`         │
+│ - E2E tests (verify ingestion-to-snapshot flow)        │
+└──────────────────────┬─────────────────────────────────┘
+                       │ (Pass)
+                       ▼
+┌────────────────────────────────────────────────────────┐
+│ STAGE 5: DEPLOYMENT & POST-DEPLOYMENT VERIFICATION     │
+│ - GitOps promotion & state reconciliation              │
+│ - Post-deploy health verification                      │
+│ - Rollback trigger on failed smoke verification        │
+└────────────────────────────────────────────────────────┘
 ```
 
-Execution order on init:
+---
 
-1. `00-create-databases.sh` — creates databases + roles
-2. `01-dora-schema.sql` — creates tables
-3. `02-dora-roles.sql` — grants least-privilege permissions
-4. `hypertables.sql` — converts time-series tables to hypertables
+## 3. Detailed Stage Design
 
-## Components
+### 3.1 Stage 1: Pre-Commit (Local & PR Gate)
 
-### Component: Database Init Scripts (`database/init/`)
+- **Local**: Developers use local `pre-commit` hooks. If any hook fails (formatting, trailing whitespace, secrets), the commit is aborted.
+- **CI**: `reusable-preflight.yml` checks that:
+  - Commit messages follow Conventional Commits.
+  - `.env.example` has no concrete secrets (only allows placeholders or `${VAR}` templates).
+  - No secrets are leaked via Gitleaks.
 
-| File                     | Purpose                                                              | Idempotent                                                             | Key behavior                                                                                                                                      |
-| ------------------------ | -------------------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `00-create-databases.sh` | Create `dora_metrics`, `infisical`, `defectdojo` databases and roles | ✅ `CREATE DATABASE IF NOT EXISTS` via psql                            | Uses `DO $$ BEGIN ... EXCEPTION WHEN duplicate_database THEN null; END $$` pattern. No env vars for credentials.                                  |
-| `01-dora-schema.sql`     | Create all 6 tables with columns, types, indexes                     | ✅ `CREATE TABLE IF NOT EXISTS`                                        | Defines the full schema per data model below                                                                                                      |
-| `02-dora-roles.sql`      | Create `dora_app` role with least-privilege grants                   | ✅ `DO $$ BEGIN ... EXCEPTION WHEN duplicate_object THEN null; END $$` | Grants only: INSERT on event_queue, SELECT/INSERT on raw_events/dora_snapshots, SELECT on archetype_history/wellbeing_surveys/vsi_stage_breakdown |
+### 3.2 Stage 2: Post-Commit CI
 
-### Component: TimescaleDB Hypertables (`database/timescaledb/`)
+- **Linting**: Auto-detects languages (Python, Go, JS/TS, Shell, YAML) and runs language-appropriate lints in parallel.
+- **Security Scans**:
+  - Trivy scans the filesystem for vulnerabilities.
+  - Safety (Python) or NPM Audit (JS/TS) checks third-party dependencies.
+  - Dependency Review acts as a pull-request gate to prevent vulnerable packages from being merged.
 
-| File              | Purpose                                                                                              |
-| ----------------- | ---------------------------------------------------------------------------------------------------- |
-| `hypertables.sql` | Converts `raw_events`, `dora_snapshots`, `vsi_stage_breakdown` to hypertables with time partitioning |
+### 3.3 Stage 3: Build & Validate
 
-Hypertable strategy:
+- **Docker Building**: Executes multi-stage container builds.
+- **Supply Chain Protection**: Validates the `compose.yaml` and `docker-compose.dev.yml` to ensure no container uses `:latest` tags, guaranteeing deterministic builds.
 
-- Partition key: `recorded_at` (timestamptz)
-- Chunk interval: 1 day (suitable for per-deployment granularity)
-- Compression policy: enabled after 7 days
+### 3.4 Stage 4: Pre-Deployment Validation (Isolated Test Stack)
 
-### Component: Migrations (`database/migrations/`)
+This is the core test execution stage. To achieve high fidelity without external environment dependency, the stage runs in three parts:
 
-| File                     | Purpose                                                                                                          |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| `001-initial-schema.sql` | Forward-only migration matching init scripts. Creates a `_migrations` tracking table. First run = migration 001. |
+#### Part A: Integration Testing (`docker-compose.integration.yml`)
 
-Migration strategy:
+- Starts a TimescaleDB instance and the FastAPI ingestion API.
+- Runs `pytest tests/integration/test_schema.py` which verifies:
+  - Database schema initializes correctly.
+  - All tables and indexes exist.
+  - Hypertable conversions succeed.
+  - Least-privilege grants on `event_queue`, `raw_events`, and `dora_snapshots` are respected.
 
-- Tracking table: `_schema_migrations` (version, applied_at, checksum)
-- Forward-only: no rollback scripts
-- Each migration is a single file with version prefix
+#### Part B: Smoke Testing (Health Check Loop)
 
-### Component: Development Environment (`docker-compose.dev.yml`)
+- Starts the full stack.
+- Performs an automated curl smoke-check from an ephemeral container using:
+  ```sh
+  docker run --network host appropriate/curl \
+    -s --retry 10 --retry-delay 2 --retry-connrefused http://localhost:8088/health
+  ```
+- This guarantees that the API is fully initialized and communicating with the database pool before proceeding.
 
-Single service: `timescaledb` on port 5432 with:
+#### Part C: E2E System Flow Verification
 
-- Image: `timescale/timescaledb:latest-pg16`
-- Init scripts mounted to `/docker-entrypoint-initdb.d/`
-- Named volume for data persistence
-- `.env` file for credentials (gitignored)
+- A simulated event producer posts canonical events (e.g. `deployment` and `incident`) to the ingestion API.
+- The worker processes them into `raw_events`.
+- The compute cron runs `compute/metrics.py` to calculate DORA metrics.
+- The test asserts that the resulting database snapshot contains accurate computed values.
 
-### Component: Tests (`tests/unit/test_schema.py`)
+### 3.5 Stage 5: Deployment & Verification
 
-Test strategy:
+- Uses GitOps patterns where merging to `main` promotes the image tag.
+- If a post-deployment health check fails or a Prometheus critical alert trips (e.g. `DoraFDRTSpike` or a system level crash), an automated CD trigger executes a rollback to the previous stable release tag.
 
-- Uses `testcontainers.postgres` with `PostgresContainer` image `timescale/timescaledb:latest-pg16`
-- Applies all init scripts in order
-- Verifies: all 6 tables exist, 3 hypertables created, role permissions correct (not superuser)
-- Cleans up container after run
+---
 
-## Data Model
+## 4. Key Design Tradeoffs
 
-### `event_queue`
+### Tradeoff 1: Docker-backed Integration Tests in CI vs. Stubbing / Mocking
 
-Event ingestion buffer — incoming CI/CD events land here before processing.
+- **Option A (Stubbing)**: Mock all database and external queries in unit tests. Highly fast but low fidelity — schema syntax, hypertable conversions, and database grant constraints are completely untested in the pipeline.
+- **Option B (Docker Stacks)**: Spin up real TimescaleDB containers using testcontainers or local docker-compose. Slower but catches syntax errors, schema migration failures, and permission errors before deployment.
+- **Decision**: **Option B (Docker Stacks)**. This satisfies our goal of high confidence. We mitigate the speed penalty by keeping unit tests fast and containerless, running the Docker-backed integration and smoke tests in a separate, isolated job in the PR pipeline.
 
-| Column       | Type         | Constraints       | Description                                         |
-| ------------ | ------------ | ----------------- | --------------------------------------------------- |
-| id           | BIGSERIAL    | PRIMARY KEY       | Auto-incrementing ID                                |
-| event_type   | VARCHAR(64)  | NOT NULL          | e.g., 'deployment', 'build', 'test_run'             |
-| source       | VARCHAR(128) | NOT NULL          | Origin system (e.g., 'github-actions', 'gitlab-ci') |
-| payload      | JSONB        | NOT NULL          | Event-specific data                                 |
-| status       | VARCHAR(32)  | DEFAULT 'pending' | 'pending', 'processing', 'done', 'error'            |
-| received_at  | TIMESTAMPTZ  | DEFAULT NOW()     | When event was ingested                             |
-| processed_at | TIMESTAMPTZ  | NULL              | When event was processed                            |
+### Tradeoff 2: Inline Curl Smoke Loop vs. Playwright/Acceptance Framework
 
-Index: `(status, received_at)` for queue polling.
+- **Option A (Curl-only)**: A lightweight, portable shell script checking `/health` via curl. Extremely fast, robust, and zero install overhead.
+- **Option B (Playwright)**: Full node browser automation tool. Excellent for UIs, but since uFawkesDORA is a stateless backend plane with no frontend UI of its own, Playwright is a heavy, unnecessary dependency.
+- **Decision**: **Option A (Curl-only)**. We will use a curl smoke test loop to verify API and database connectivity, and use python-based request validation for API-to-database E2E testing, keeping the pipeline lean and avoiding Playwright bloat in backend-only repos.
 
-### `raw_events` (hypertable)
+---
 
-Processed deployment/CI events — the primary source for DORA metric computation.
+## 5. Reusability Plan for other uFawkes repos
 
-| Column           | Type         | Constraints                | Description                      |
-| ---------------- | ------------ | -------------------------- | -------------------------------- |
-| id               | BIGSERIAL    | PRIMARY KEY                | Auto-incrementing ID             |
-| event_queue_id   | BIGINT       | REFERENCES event_queue(id) | Source queue entry               |
-| event_type       | VARCHAR(64)  | NOT NULL                   | e.g., 'deployment', 'build'      |
-| source           | VARCHAR(128) | NOT NULL                   | Origin system                    |
-| outcome          | VARCHAR(32)  | NOT NULL                   | 'success', 'failure', 'rollback' |
-| duration_seconds | INTEGER      | NULL                       | Event duration                   |
-| metadata         | JSONB        | NULL                       | Additional context               |
-| recorded_at      | TIMESTAMPTZ  | NOT NULL DEFAULT NOW()     | When event occurred              |
-| ingested_at      | TIMESTAMPTZ  | DEFAULT NOW()              | When record was created          |
+To inherit this design, other repositories in the suite (e.g., `uFawkesObs`, `uFawkesSec`, `uFawkesAI`) only need to:
 
-Partitioned by: `recorded_at` (hypertable, 1-day chunks).
-
-### `dora_snapshots` (hypertable)
-
-Periodic snapshots of the four DORA metrics for trend analysis.
-
-| Column                | Type          | Constraints            | Description             |
-| --------------------- | ------------- | ---------------------- | ----------------------- |
-| id                    | BIGSERIAL     | PRIMARY KEY            | Auto-incrementing ID    |
-| team_id               | VARCHAR(64)   | NOT NULL               | Team identifier         |
-| deployment_frequency  | NUMERIC(10,4) | NOT NULL               | Deployments per week    |
-| lead_time_hours       | NUMERIC(10,2) | NULL                   | Lead time in hours      |
-| change_failure_rate   | NUMERIC(5,4)  | NULL                   | 0.0000–1.0000           |
-| time_to_restore_hours | NUMERIC(10,2) | NULL                   | MTTR in hours           |
-| snapshot_window_start | TIMESTAMPTZ   | NOT NULL               | Window start            |
-| snapshot_window_end   | TIMESTAMPTZ   | NOT NULL               | Window end              |
-| recorded_at           | TIMESTAMPTZ   | NOT NULL DEFAULT NOW() | When snapshot was taken |
-
-Partitioned by: `recorded_at` (hypertable, 7-day chunks).
-Index: `(team_id, recorded_at DESC)` for per-team trend queries.
-
-### `archetype_history`
-
-Team archetype classification records — tracks how teams are categorized over time.
-
-| Column      | Type         | Constraints                   | Description                                 |
-| ----------- | ------------ | ----------------------------- | ------------------------------------------- |
-| id          | BIGSERIAL    | PRIMARY KEY                   | Auto-incrementing ID                        |
-| team_id     | VARCHAR(64)  | NOT NULL                      | Team identifier                             |
-| archetype   | VARCHAR(32)  | NOT NULL                      | 'elite', 'high', 'medium', 'low', 'unknown' |
-| snapshot_id | BIGINT       | REFERENCES dora_snapshots(id) | Source snapshot                             |
-| confidence  | NUMERIC(3,2) | NULL                          | Classification confidence                   |
-| recorded_at | TIMESTAMPTZ  | NOT NULL DEFAULT NOW()        | When classified                             |
-
-Index: `(team_id, recorded_at DESC)` for archetype history queries.
-
-### `wellbeing_surveys`
-
-Developer wellbeing survey responses — used to correlate DORA metrics with team wellbeing.
-
-| Column         | Type         | Constraints            | Description                     |
-| -------------- | ------------ | ---------------------- | ------------------------------- |
-| id             | BIGSERIAL    | PRIMARY KEY            | Auto-incrementing ID            |
-| respondent_id  | VARCHAR(128) | NOT NULL               | Anonymous respondent identifier |
-| survey_version | VARCHAR(16)  | NOT NULL               | Survey version tag              |
-| q1_score       | SMALLINT     | CHECK (1-5)            | Wellbeing question 1            |
-| q2_score       | SMALLINT     | CHECK (1-5)            | Wellbeing question 2            |
-| q3_score       | SMALLINT     | CHECK (1-5)            | Wellbeing question 3            |
-| q4_score       | SMALLINT     | CHECK (1-5)            | Wellbeing question 4            |
-| q5_score       | SMALLINT     | CHECK (1-5)            | Wellbeing question 5            |
-| free_text      | TEXT         | NULL                   | Optional qualitative feedback   |
-| submitted_at   | TIMESTAMPTZ  | NOT NULL DEFAULT NOW() | When submitted                  |
-
-Index: `(survey_version, submitted_at)` for survey analysis.
-
-### `vsi_stage_breakdown` (hypertable)
-
-Value stream stage timing data — breakdown of lead time into individual stages.
-
-| Column           | Type         | Constraints            | Description                                         |
-| ---------------- | ------------ | ---------------------- | --------------------------------------------------- |
-| id               | BIGSERIAL    | PRIMARY KEY            | Auto-incrementing ID                                |
-| deployment_id    | VARCHAR(128) | NOT NULL               | Associated deployment                               |
-| stage_name       | VARCHAR(64)  | NOT NULL               | e.g., 'commit', 'review', 'build', 'test', 'deploy' |
-| duration_seconds | INTEGER      | NOT NULL               | Time spent in this stage                            |
-| status           | VARCHAR(32)  | NOT NULL               | 'success', 'failure', 'skipped'                     |
-| metadata         | JSONB        | NULL                   | Stage-specific context                              |
-| recorded_at      | TIMESTAMPTZ  | NOT NULL DEFAULT NOW() | When stage completed                                |
-
-Partitioned by: `recorded_at` (hypertable, 1-day chunks).
-Index: `(deployment_id, stage_name)` for deployment breakdown queries.
-
-## Interfaces
-
-### SQL API — Init Scripts
-
-<<<<<<< HEAD
-The init scripts expose no network interfaces. They are consumed by:
-
-- **psql** during container initialization (`docker-entrypoint-initdb.d/`)
-- **testcontainers** in unit tests
-- **bind-mount** in the fawkes resource plane
-
-### SQL API — Application Access
-
-The `dora_app` role has access to:
-
-- `INSERT INTO event_queue (...) VALUES (...)` — enqueue events
-- `SELECT/INSERT INTO raw_events` — read/write processed events
-- `INSERT INTO dora_snapshots` — write metric snapshots
-- `SELECT on archetype_history`, `wellbeing_surveys`, `vsi_stage_breakdown` — read-only
-
-## Tradeoffs
-
-| Decision              | Chosen                              | Rejected              | Rationale                                                                                        |
-| --------------------- | ----------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------ |
-| Base image            | `timescale/timescaledb:latest-pg16` | `postgres:16-alpine`  | TimescaleDB provides `time_bucket()`, `percentile_agg()`, and hypertables without index overhead |
-| Partition key         | `recorded_at` timestamptz           | `id` or `team_id`     | Time-based partitioning is the natural access pattern for DORA metrics                           |
-| Chunk interval        | 1 day (7 days for snapshots)        | 1 hour, 1 week        | 1-day chunks balance query performance with chunk management overhead                            |
-| Migration style       | Forward-only SQL                    | ORM-based, framework  | Simple, portable, no runtime dependency                                                          |
-| Credential management | psql inline SQL                     | Environment variables | Least-privilege, no credential leak risk, auditable                                              |
-| Test framework        | testcontainers                      | mock/patch            | Tests the actual SQL against a real Postgres, not mocked behavior                                |
-
-## Risks
-
-| Risk                                     | Severity | Mitigation                                                                                                    |
-| ---------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------- |
-| TimescaleDB licensing changes            | LOW      | Schema uses standard PostgreSQL types + TimescaleDB hypertables only; could migrate to PG partition if needed |
-| Schema drift between init and migrations | MEDIUM   | Migration 001 is generated from init scripts; diff check in CI                                                |
-| Bind-mount path mismatch                 | LOW      | `docker-compose.dev.yml` uses relative path consistent with fawkes resource plane                             |
-| Testcontainers port conflicts            | LOW      | Testcontainers uses random port mapping                                                                       |
-
-## Governance Alignment
-
-| Requirement | Design Decision                                                       | Status  |
-| ----------- | --------------------------------------------------------------------- | ------- |
-| Security    | Least-privilege `dora_app` role, no superuser, no env var credentials | COVERED |
-| Idempotency | All scripts use `IF NOT EXISTS` / exception-safe patterns             | COVERED |
-| Portability | All paths relative, bind-mount compatible                             | COVERED |
-| Testability | Full schema tested via testcontainers with real Postgres              | COVERED |
-| CI          | pytest runs on all pushes                                             | COVERED |
-
-## Tradeoff Decisions
-
-| Decision                             | Rationale                                                                          | Alternatives Considered                                                          |
-| ------------------------------------ | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| POSIX sh (not bash)                  | Maximum portability across containers, CI runners, and developer machines          | Bash — rejected because many minimal CI images lack bash                         |
-| Interactive prompts in scripts       | Makes the script usable without reference docs; useful in incident stress          | Flags-only — rejected because reading docs under pressure is failure-prone       |
-| curl with `\|\|` true in CI snippets | Prevents a DORA event collector from failing the pipeline                          | Hard fail — rejected; the pipeline should not fail because observability is down |
-| Woodpecker `from_secret`             | Follows Woodpecker's security best practices                                       | Environment variables in pipeline config — less secure                           |
-| Scripts exit code 1 on failure       | Manual scripts need the user to know it failed (unlike CI where it's non-critical) | Silent failure — dangerous; user would think FDRT is being tracked when it's not |
+1. Reference the centralized reusable workflows in `.github/workflows/`.
+2. Define their local `docker-compose.integration.yml` file mapping their local runtime stack.
+3. Configure their local `ci-pipeline.yml` DAG to match their test gates.
+   This ensures a unified, golden-path CI/CD experience across the entire organization.

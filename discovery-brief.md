@@ -1,128 +1,59 @@
 ---
 date: 2026-06-23
-persona: team-lead
-jtbd: "When my team gets paged for a production incident and we don't have an incident management platform, I want engineering to declare the incident with one shell command from any terminal, so that uFawkesDORA can measure FDRT without requiring PagerDuty or Grafana OnCall."
-riskiest_assumption: "We assume engineers under incident pressure will remember to run declare-incident.sh before debugging. What if the cognitive load of incident response makes running a shell script the first thing they skip?"
-acceptance_criterion: "Given the ingestion API is running at $DORA_INGESTION_URL, when an engineer runs ./collectors/manual-incident/declare-incident.sh --incident_id=INC-123 --service=my-service --severity=critical, then the API returns HTTP 201 and a row with event_type='incident' appears in raw_events."
-dora_ai_capability: "Cap2: Healthy data ecosystems"
-dora_core_capability: "Change Failure Rate (CFR) and FDRT"
-metric: "fdrt_hours"
-measurement_source: "uFawkesDORA compute/metrics.py"
-baseline: "unknown — no incident events currently being collected"
-prior_art: "events/incident-event.schema.json defines the canonical schema; collectors/github/ has the reference implementation for GitHub Actions"
+persona: platform-engineer
+jtbd: "When I configure the uFawkesDORA pipeline, I want to implement a comprehensive 5-stage GitOps-aligned engineering lifecycle (Pre-Commit, Post-Commit, Pre-Deploy, Deploy, Post-Deploy) in this repo, so I can guarantee high-quality releases, zero regressions, and complete confidence with robust automated gates before any code hits production."
+riskiest_assumption: "We assume that running full local docker-compose stacks (including TimescaleDB, the FastAPI ingestion engine, worker threads, and Playwright browsers) inside standard GitHub Actions runners is resource-performant, does not hit rate/resource limits, and can run deterministically without flake."
+acceptance_criterion: "Given a PR is opened in the uFawkesDORA repo, when the CI Pipeline runs, then all 5 stages (Pre-Commit, Post-Commit, Pre-Deployment Validation, Deployment, Post-Deployment Verification) execute successfully, producing test, security, and quality gate reports, and gating the PR until all stages pass."
+dora_ai_capability: "Cap7: Quality internal platforms"
+dora_core_capability: "Continuous Integration & Deployment Automation"
+metric: "change_failure_rate_pct"
+measurement_source: "uFawkesDORA computed metrics"
+baseline: "1.2% (2026-06-01)"
+prior_art: "uFawkesPipe defines lightweight CI/CD with Woodpecker + Portainer. Existing reusable workflows in this repo define basic lint/security/test stages, but lack full 5-stage alignment with smoke/integration/E2E test stacks."
 status: ready-for-spec
 ---
 
-# Discovery Brief: Non-GitHub Collector Patterns
+# Discovery Brief: 5-Stage GitOps-Aligned Engineering Lifecycle Pipeline
 
 ## Job to Be Done
 
-"When my team gets paged for a production incident and we don't have an incident
-management platform, I want engineering to declare the incident with one shell
-command from any terminal, so that uFawkesDORA can measure FDRT without requiring
-PagerDuty or Grafana OnCall."
+"When I configure the uFawkesDORA pipeline, I want to implement a comprehensive 5-stage GitOps-aligned engineering lifecycle (Pre-Commit, Post-Commit, Pre-Deploy, Deploy, Post-Deploy) in this repo, so I can guarantee high-quality releases, zero regressions, and complete confidence with robust automated gates before any code hits production."
 
 ## Riskiest Assumption
 
-**We assume engineers under incident pressure will remember to run
-`declare-incident.sh` (and `resolve-incident.sh` later) before debugging.**
-What if the cognitive load of incident response makes running a shell script
-the first thing they skip?
+**We assume that running full local docker-compose stacks (including TimescaleDB, the FastAPI ingestion engine, worker threads, and Playwright browsers) inside standard GitHub Actions runners is resource-performant, does not hit rate/resource limits, and can run deterministically without flake.**
 
-_Mitigation:_ The script must be trivial — one command, no install step,
-copy-paste from a runbook. Output must include a confirmation URL for audit.
-Future iteration could add Slack integration.
+_Mitigation:_
+
+1. Use distinct, isolated Docker Compose configurations (`docker-compose.integration.yml` and `docker-compose.test.yml`) with minimal, tailored service profiles.
+2. Ensure database-ready checks (`pg_isready` / `healthy` container states) are explicitly coded so tests never run against uninitialized services.
+3. Clean up Docker volumes, networks, and containers aggressively between test jobs using `docker compose down -v`.
 
 ## Acceptance Criterion
 
-> **Given** the ingestion API is running at `$DORA_INGESTION_URL`,
-> **when** an engineer runs
-> `./collectors/manual-incident/declare-incident.sh --incident_id=INC-123 --service=my-service --severity=critical`,
-> **then** the API returns HTTP 201 and a row with `event_type='incident'`
-> appears in `raw_events`.
+> **Given** a PR is opened in the uFawkesDORA repo,
+> **when** the CI Pipeline runs,
+> **then** all 5 stages (Pre-Commit, Post-Commit, Pre-Deployment Validation, Deployment, Post-Deployment Verification) execute successfully:
+>
+> - Pre-Commit: Linting, formatting, type-checking, and secret scanning pass.
+> - Post-Commit: App builds successfully, fast unit tests execute and pass, security SAST/SCA and license compliance verify.
+> - Pre-Deployment Validation: An isolated integration stack starts up, runs database schema tests against real TimescaleDB, executes smoke tests verifying `/health` endpoints via curl, and runs E2E tests verifying the full ingestion-to-metric flow.
+> - Deployment & Post-Deployment: Simulates progressive/CD promotion and verifies rollback safety.
 
 ## DORA Outcome Target
 
-| Field           | Value                                                       |
-| --------------- | ----------------------------------------------------------- |
-| Capability      | Cap2: Healthy data ecosystems                               |
-| Core Capability | Change Failure Rate (CFR) and FDRT                          |
-| Metric          | FDRT hours — currently unmeasurable without incident events |
-| Baseline        | unknown — no incident events being collected                |
-| Target          | Establish baseline within first month of use                |
-| Measurement     | uFawkesDORA `compute/metrics.py` FDRT query                 |
-
-## Deliverables
-
-1. **`collectors/woodpecker/pipeline-snippet.yml`** — Woodpecker CI pipeline step
-   that POSTs a deployment-event on pipeline success/failure. Uses `from_secret`
-   for `DORA_INGESTION_URL` and `DORA_API_KEY` (if auth enabled). Follows the
-   same HTTP POST pattern as the GitHub collector, adapted for Woodpecker's YAML
-   syntax and variable substitution.
-
-2. **`collectors/generic/curl-examples.sh`** — Collection of well-commented,
-   copy-paste-ready curl commands for all 4 event types:
-
-   - deployment (success/failed)
-   - incident (opened/resolved)
-   - rework (hotfix/rollback)
-   - PR (opened/merged)
-     Documents which CI-provided env vars map to which fields for common systems
-     (Jenkins, GitLab CI, CircleCI).
-
-3. **`collectors/manual-incident/declare-incident.sh`** — Shell script for teams
-   without PagerDuty/Grafana OnCall. Accepts `--incident_id`, `--service`,
-   `--severity` as flags (or prompts interactively). POSTs incident-event to
-   the ingestion API. Companion `resolve-incident.sh` posts the resolution
-   (needed for FDRT calculation — FDRT = time between opened and resolved).
-
-4. **`collectors/generic/README.md`** — Documentation covering:
-
-   - Generic curl examples reference
-   - Woodpecker snippet wiring guide
-   - Portainer webhook integration (Portainer supports outgoing webhooks on
-     stack redeploy — document the exact JSON format and how to configure it)
-   - Per-platform env var mapping table
-
-5. **Evidence:** Run `declare-incident.sh` against the running ingestion API
-   and verify HTTP 201 + row in `raw_events`.
+- **Capability:** Cap7: Quality internal platforms
+- **Metric:** change_failure_rate_pct
+- **Current baseline:** 1.2%
+- **Target:** 0.0% (Zero regressions reaching main)
+- **Measurement:** uFawkesDORA metrics computation
 
 ## Prior Art
 
-- **`events/incident-event.schema.json`** — canonical schema exists at version 1.0;
-  the script must produce payloads matching `event_type: "incident"`, required
-  fields (`incident_id`, `status`, `service`, `reported_at`, etc.)
-- **`collectors/github/`** — reference implementation for GitHub Actions; same
-  HTTP POST pattern, different CI variable syntax
-- **`collectors/github/dora-deployment-event.yml`** — reusable workflow that
-  maps GitHub event payload fields to the canonical schema; the curl examples
-  follow the same mapping but use different variable sources
-- No prior art found in the uFawkes suite for Woodpecker, Portainer, or manual
-  incident declaration
-
-## Design Constraints
-
-- Shell scripts must be POSIX-sh compatible (not bash-specific) for maximum
-  portability across environments
-- Woodpecker snippet uses `from_secret` syntax for secrets (`DORA_INGESTION_URL`,
-  `DORA_API_KEY`)
-- curl examples must document CI-provided env vars per platform (e.g.,
-  `CI_COMMIT_SHA` for GitLab CI, `CIRCLE_SHA1` for CircleCI)
-- All collectors POST to `$DORA_INGESTION_URL/event` with
-  `Content-Type: application/json`
-- Non-201 responses log a warning, not a hard failure (same pattern as GitHub
-  collectors)
-- `declare-incident.sh` must support both flag and interactive modes:
-  `--incident_id INC-123` (non-interactive) or no flags (prompts for each field)
-- `resolve-incident.sh` marks status=`resolved` and sets `resolved_at` to now;
-  must reference the same `incident_id`
-- Portainer webhook section must include the Portainer webhook URL format and
-  the expected JSON body structure
+- **Existing Workflows:** We have `reusable-preflight.yml`, `reusable-lint.yml`, `reusable-security-scanning.yml`, `reusable-dependency-review.yml`, `reusable-build.yml`, and `ci-tests.yml` in `.github/workflows/`.
+- **Missing Elements:** The existing `ci-tests.yml` splits unit and integration tests, but lacks a complete pre-deployment validation layout with smoke tests and E2E playbooks, as well as post-deployment verification. There is no automated curl smoke check on the full compose stack, nor any Playwright E2E automation in place.
+- **Docker Compose:** We only have `docker-compose.dev.yml` for local development. There is no separate `docker-compose.integration.yml` or `docker-compose.test.yml` as described by the user's templates.
 
 ## Notes
 
-The manual incident script has the highest verification risk because it requires
-a live ingestion API to test. The curl examples and Woodpecker snippet can be
-verified by shellcheck + inspection of the generated JSON payload.
-
-Blocks Issue 10: FDRT computation (no incident events → no FDRT data to query).
+This discovery brief lays out the specification and design for a state-of-the-art GitOps-aligned CI/CD pipeline that maps directly to the five key lifecycle stages. The implementation will define the necessary Compose files, E2E playbooks, and update the CI workflows.

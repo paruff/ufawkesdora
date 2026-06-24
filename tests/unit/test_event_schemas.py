@@ -11,9 +11,7 @@ import json
 from pathlib import Path
 
 import pytest
-from jsonschema import Draft7Validator, ValidationError, validate
-from jsonschema import FormatChecker
-
+from jsonschema import Draft7Validator, FormatChecker, ValidationError, validate
 
 # ── Format checker for date-time ───────────────────────────────────────────────
 # jsonschema does not ship with date-time format validation by default.
@@ -99,12 +97,15 @@ def rework_schema() -> dict:
 class TestSchemaValidity:
     """Verify each schema file is itself valid JSON Schema (draft-07)."""
 
-    @pytest.mark.parametrize("schema_name", [
-        "deployment-event.schema.json",
-        "incident-event.schema.json",
-        "pr-event.schema.json",
-        "rework-event.schema.json",
-    ])
+    @pytest.mark.parametrize(
+        "schema_name",
+        [
+            "deployment-event.schema.json",
+            "incident-event.schema.json",
+            "pr-event.schema.json",
+            "rework-event.schema.json",
+        ],
+    )
     def test_schema_is_valid_draft07(self, schema_name):
         """AC-04: All schemas must be valid draft-07 JSON Schema documents."""
         schema = load_schema(schema_name)
@@ -122,14 +123,14 @@ class TestSchemaValidity:
         for name, schema in load_all_schemas().items():
             props = schema.get("properties", {})
             assert "event_type" in props, f"{name} is missing event_type property"
-            assert "const" in props["event_type"], \
-                f"{name}: event_type should be a const"
+            assert "const" in props["event_type"], f"{name}: event_type should be a const"
 
     def test_all_schemas_have_additional_properties_false(self):
         """All schemas should reject unknown fields."""
         for name, schema in load_all_schemas().items():
-            assert schema.get("additionalProperties") is False, \
-                f"{name} should set additionalProperties: false"
+            assert (
+                schema.get("additionalProperties") is False
+            ), f"{name} should set additionalProperties: false"
 
 
 # ── Deployment Event ───────────────────────────────────────────────────────────
@@ -149,7 +150,7 @@ class TestDeploymentEvent:
             "commit_sha": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",  # pragma: allowlist secret
             "deployed_at": "2026-06-22T10:30:00Z",
             "status": "success",
-            "pipeline_url": "https://github.com/my-org/my-service/actions/runs/12345"
+            "pipeline_url": "https://github.com/my-org/my-service/actions/runs/12345",
         }
 
     def test_valid_deployment_passes(self, deployment_schema, valid_payload):
@@ -176,9 +177,7 @@ class TestDeploymentEvent:
 
     def test_optional_fields_accepted(self, deployment_schema, valid_payload):
         """AC-01: Providing optional fields must not break validation."""
-        payload = dict(valid_payload,
-                       deploy_duration_seconds=120,
-                       ai_assisted=True)
+        payload = dict(valid_payload, deploy_duration_seconds=120, ai_assisted=True)
         validate(payload, deployment_schema)
 
     def test_additional_properties_rejected(self, deployment_schema, valid_payload):
@@ -215,7 +214,7 @@ class TestIncidentEvent:
             "repo": "my-org/my-service",
             "service": "api-gateway",
             "status": "opened",
-            "occurred_at": "2026-06-22T10:30:00Z"
+            "occurred_at": "2026-06-22T10:30:00Z",
         }
 
     def test_valid_incident_passes(self, incident_schema, valid_payload):
@@ -237,9 +236,11 @@ class TestIncidentEvent:
             validate(payload, incident_schema)
 
     def test_optional_fields_accepted(self, incident_schema, valid_payload):
-        payload = dict(valid_payload,
-                       linked_deployment_sha="a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",  # pragma: allowlist secret
-                       severity="SEV1")
+        payload = dict(
+            valid_payload,
+            linked_deployment_sha="a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",  # pragma: allowlist secret
+            severity="SEV1",
+        )
         validate(payload, incident_schema)
 
     def test_additional_properties_rejected(self, incident_schema, valid_payload):
@@ -264,7 +265,7 @@ class TestPREvent:
             "commit_sha": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",  # pragma: allowlist secret
             "status": "merged",
             "occurred_at": "2026-06-22T10:30:00Z",
-            "first_commit_at": "2026-06-20T08:00:00Z"
+            "first_commit_at": "2026-06-20T08:00:00Z",
         }
 
     def test_valid_pr_passes(self, pr_schema, valid_payload):
@@ -286,10 +287,7 @@ class TestPREvent:
             validate(payload, pr_schema)
 
     def test_optional_fields_accepted(self, pr_schema, valid_payload):
-        payload = dict(valid_payload,
-                       lines_added=100,
-                       lines_deleted=50,
-                       ai_assisted=True)
+        payload = dict(valid_payload, lines_added=100, lines_deleted=50, ai_assisted=True)
         validate(payload, pr_schema)
 
     def test_pr_number_must_be_positive(self, pr_schema, valid_payload):
@@ -323,7 +321,7 @@ class TestReworkEvent:
             "deployment_sha": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",  # pragma: allowlist secret
             "rework_type": "hotfix",
             "triggered_at": "2026-06-22T10:30:00Z",
-            "user_visible": True
+            "user_visible": True,
         }
 
     def test_valid_rework_passes(self, rework_schema, valid_payload):
@@ -382,7 +380,7 @@ class TestCrossSchema:
             "commit_sha": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",  # pragma: allowlist secret
             "deployed_at": "2026-06-22T10:30:00Z",
             "status": "success",
-            "pipeline_url": "https://example.com/pipeline/1"
+            "pipeline_url": "https://example.com/pipeline/1",
         }
         with pytest.raises(ValidationError):
             validate(deployment, incident_schema)
@@ -396,7 +394,7 @@ class TestCrossSchema:
             "repo": "org/repo",
             "service": "svc",
             "status": "opened",
-            "occurred_at": "2026-06-22T10:30:00Z"
+            "occurred_at": "2026-06-22T10:30:00Z",
         }
         with pytest.raises(ValidationError):
             validate(incident, deployment_schema)
@@ -411,21 +409,24 @@ class TestCrossSchema:
             "commit_sha": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",  # pragma: allowlist secret
             "status": "opened",
             "occurred_at": "2026-06-22T10:30:00Z",
-            "first_commit_at": "2026-06-20T08:00:00Z"
+            "first_commit_at": "2026-06-20T08:00:00Z",
         }
         with pytest.raises(ValidationError):
             validate(pr, rework_schema)
 
 
-@pytest.mark.parametrize("schema_name", [
-    "deployment-event.schema.json",
-    "incident-event.schema.json",
-    "pr-event.schema.json",
-    "rework-event.schema.json",
-])
+@pytest.mark.parametrize(
+    "schema_name",
+    [
+        "deployment-event.schema.json",
+        "incident-event.schema.json",
+        "pr-event.schema.json",
+        "rework-event.schema.json",
+    ],
+)
 def test_schema_version_is_1_0(schema_name):
     """AC-05: All schemas must start at schema_version 1.0."""
-    schema = load_schema(schema_name)
+    load_schema(schema_name)
     # The schema itself doesn't carry version; payloads do.
     # Instead verify that a payload with version "1.0" passes.
     pass
