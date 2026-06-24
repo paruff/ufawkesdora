@@ -36,7 +36,7 @@ jobs:
 
       - name: Install test dependencies
         run: |
-          pip install pytest pytest-cov httpx pyyaml
+          pip install pytest pytest-cov pytest-asyncio httpx pyyaml
           if [ -f requirements-ingestion.txt ]; then pip install -r requirements-ingestion.txt; fi
           if [ -f compute/requirements.txt ]; then pip install -r compute/requirements.txt; fi
 
@@ -76,7 +76,7 @@ jobs:
 
       - name: Install test dependencies
         run: |
-          pip install pytest pytest-cov testcontainers psycopg2-binary httpx
+          pip install pytest pytest-cov pytest-asyncio testcontainers psycopg2-binary httpx
           if [ -f requirements-ingestion.txt ]; then pip install -r requirements-ingestion.txt; fi
           if [ -f compute/requirements.txt ]; then pip install -r compute/requirements.txt; fi
 
