@@ -71,6 +71,9 @@ jobs:
   deploy:
     name: Deploy
     needs: [tests]
+    permissions:
+      contents: write
+      pull-requests: write
     if: |
       success() &&
       github.event_name == 'push' &&
