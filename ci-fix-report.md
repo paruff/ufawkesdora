@@ -1,27 +1,35 @@
-# CI Fix Report
+# CI Fix Report — PR #18
 
 ```
-Changed:      10 files modified:
-              - compute/metrics.py (1 line: added pragma to dev DSN string)
-              - database/init/00-create-databases.sh (1 line: pragma on placeholder pw)
-              - database/init/02-dora-roles.sql (1 line: pragma on placeholder pw)
-              - database/migrations/001-initial-schema.sql (1 line: pragma on placeholder pw)
-              - tests/unit/test_event_schemas.py (6 lines: pragma on test SHAs)
-              - tests/unit/test_ingestion_api.py (4 lines: pragma on test SHAs)
-              - tests/unit/test_schema.py (1 line: pragma on placeholder pw in SQL)
-              - tests/unit/test_worker.py (1 line: pragma on test SHA)
-              + end-of-file-fixer added trailing newlines to 4 files
-              + prettier/markdownlint auto-formatted 4 files
+Fix 1 — Markdown Lint + Prettier Formatting:
+Changed:      docs/plan/plan.md
+              - Fixed MD004 markdownlint error: combined lines 1256-1257 so `+`
+                is not at the start of a line (was being interpreted as unordered
+                list marker `+` style instead of expected `-` style)
+              - Applied prettier formatting: table alignment, comment spacing,
+                italic syntax normalization, list continuation indentation,
+                and other whitespace fixes throughout
 
-Validation:   - pre-commit run --all-files: 13/13 hooks PASSED
-              - make test-unit: 130/130 tests PASSED
-              - make test-integration: not run (requires Docker + TimescaleDB)
-              - make test-all: skipped integrate step, unit-only validated
+Fix 2 — Conventional Commit Messages:
+Changed:      Commit history rewritten
+              - Squashed 3 commits into 1 conventional-commits-compliant commit
+              - New message: docs(plan): revise strategic plan for uFawkesDORA
+                with new metrics
+
+Validation:   - pre-commit run --all-files (with main branch config): ALL hooks PASSED
+                (16/16 hooks: trailing-whitespace, end-of-file-fixer, check-yaml,
+                 check-json, check-added-large-files, check-merge-conflict,
+                 mixed-line-ending, detect-private-key, ruff, ruff-format, black,
+                 yamllint, markdownlint, prettier, gitleaks, detect-secrets)
+              - markdownlint --config .markdownlint.json docs/plan/plan.md: PASSED
+              - prettier --check docs/plan/plan.md: PASSED
+              - Commit message matches regex:
+                /^(feat|fix|docs|style|refactor|test|chore|ci|perf|build|revert)(\(.+\))?: .{1,72}$/
 
 Remaining Risks:
-              - GitGuardian is a separate GitHub-integrated check; its findings
-                may differ from detect-secrets. Cannot verify locally.
-              - The `-- pragma: allowlist secret` syntax is valid for both SQL
-                (PostgreSQL line comment) and Python (inside f-strings sent to
-                psycopg2). Verify GitGuardian also passes after push.
+              - The DavidAnson/markdownlint-cli2-action@v16 used in the dedicated
+                "Markdown lint" CI job may behave slightly differently from the
+                pre-commit markdownlint-cli hook. The MD004 fix should resolve the
+                only error reported by that action.
+              - No remaining risks for commit format — all commits now comply.
 ```
