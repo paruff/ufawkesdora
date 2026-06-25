@@ -1,0 +1,161 @@
+# ============================================================================
+# Pipeline — 5-Phase CI/CD Pipeline Orchestrator
+# ----------------------------------------------------------------------------
+# Orchestrates the full CI/CD pipeline through five sequential phases:
+#
+#   1. pre-commit   — Static analysis, linting, pre-flight checks
+#   2. post-commit  — Build, unit tests, coverage gate
+#   3. pre-deploy   — Integration/E2E tests, security scanning, SBOM
+#   4. deploy       — GitOps CD deployment
+#   5. post-deploy  — Smoke tests, monitoring validation, DORA metrics
+#
+# Phases 1-3 run automatically on every PR and push to main.
+# Phases 4-5 require a workflow_dispatch trigger with deployment parameters.
+#
+# Each phase can run its internal jobs in parallel for maximum throughput.
+# ============================================================================
+
+name: Pipeline
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment (dev, staging, production)"
+        required: false
+        type: string
+        default: "dev"
+      image-tag:
+        description: "Container image tag to deploy"
+        required: false
+        type: string
+        default: ""
+      image-name:
+        description: "Container image name (without tag)"
+        required: false
+        type: string
+        default: "ghcr.io/paruff/ufawkesdora-api"
+      run-deploy:
+        description: "Run deploy and post-deploy phases"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  # contents: write is required for the deploy phase (Phase 4) to push
+  # GitOps manifest updates. The deploy phase is gated by a manual
+  # workflow_dispatch trigger (inputs.run-deploy) so this broad permission
+  # is only exercised when explicitly requested.
+  contents: write
+  pull-requests: write
+  security-events: write
+  actions: read
+
+concurrency:
+  group: pipeline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─── Phase 1: Pre-Commit ──────────────────────────────────────────────
+  pre-commit:
+    name: Pre-Commit
+    uses: ./.github/workflows/pre-commit.yml
+
+  # ─── Phase 2: Post-Commit ────────────────────────────────────────────
+  post-commit:
+    name: Post-Commit
+    needs: [pre-commit]
+    uses: ./.github/workflows/post-commit.yml
+
+  # ─── Phase 3: Pre-Deployment ──────────────────────────────────────────
+  pre-deployment:
+    name: Pre-Deployment
+    needs: [post-commit]
+    uses: ./.github/workflows/pre-deployment.yml
+
+  # ─── Phase 4: Deploy ──────────────────────────────────────────────────
+  deploy:
+    name: Deploy
+    needs: [pre-deployment]
+    if: |
+      always() &&
+      needs.pre-deployment.result == 'success' &&
+      (github.event_name == 'workflow_dispatch' && inputs.run-deploy)
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: ${{ inputs.environment || 'dev' }}
+      image-tag: ${{ inputs.image-tag || github.sha }}
+      image-name: ${{ inputs.image-name || 'ghcr.io/paruff/ufawkesdora-api' }}
+      manifest-path: ${{ format('overlays/{0}', inputs.environment || 'dev') }}
+
+  # ─── Phase 5: Post-Deployment ─────────────────────────────────────────
+  post-deployment:
+    name: Post-Deployment
+    needs: [deploy]
+    if: |
+      always() &&
+      needs.deploy.result == 'success'
+    uses: ./.github/workflows/post-deployment.yml
+    with:
+      environment: ${{ inputs.environment || 'dev' }}
+      deployed-tag: ${{ inputs.image-tag || github.sha }}
+      health-endpoint: ${{ format('https://api.{0}.ufawkes.dev/health', inputs.environment || 'dev') }}
+      smoke-test-command: "curl -sf ${{ format('https://api.{0}.ufawkes.dev/health', inputs.environment || 'dev') }}"
+      record-dora-metric: true
+
+  # ─── Gate: Pipeline Complete ─────────────────────────────────────────
+  pipeline-complete:
+    name: Pipeline Complete
+    needs: [pre-commit, post-commit, pre-deployment, deploy, post-deployment]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check results
+        run: |
+          echo "=== Pipeline Results ==="
+          echo "Pre-Commit:         ${{ needs.pre-commit.result }}"
+          echo "Post-Commit:        ${{ needs.post-commit.result }}"
+          echo "Pre-Deployment:     ${{ needs.pre-deployment.result }}"
+          echo "Deploy:             ${{ needs.deploy.result }}"
+          echo "Post-Deployment:    ${{ needs.post-deployment.result }}"
+
+          if [ "${{ needs.pre-commit.result }}" == "failure" ] || \
+             [ "${{ needs.post-commit.result }}" == "failure" ] || \
+             [ "${{ needs.pre-deployment.result }}" == "failure" ] || \
+             [ "${{ needs.deploy.result }}" == "failure" ] || \
+             [ "${{ needs.post-deployment.result }}" == "failure" ]; then
+            echo ""
+            echo "❌ Pipeline FAILED"
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ Pipeline PASSED"
+
+      - name: DORA pipeline finish
+        if: always()
+        run: |
+          echo "pipeline-finish:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "pipeline-result:${{ contains(needs.*.result, 'failure') && 'failure' || 'success' }}"
+
+      - name: Generate pipeline summary
+        if: always()
+        run: |
+          echo "# Pipeline Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Phase | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔍 Pre-Commit | ${{ needs.pre-commit.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔨 Post-Commit | ${{ needs.post-commit.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🧪 Pre-Deployment | ${{ needs.pre-deployment.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ needs.deploy.result }}" != "skipped" ]; then
+            echo "| 🚀 Deploy | ${{ needs.deploy.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ needs.post-deployment.result }}" != "skipped" ]; then
+            echo "| 📊 Post-Deployment | ${{ needs.post-deployment.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          fi

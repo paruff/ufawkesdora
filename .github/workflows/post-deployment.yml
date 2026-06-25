@@ -1,0 +1,203 @@
+# ============================================================================
+# Phase 5: Post-Deployment — Smoke Tests, Monitoring Validation, DORA Metrics
+# ----------------------------------------------------------------------------
+# Runs verification checks after deployment: health endpoint checks, smoke
+# tests, Prometheus target verification, alert checks, and DORA deployment
+# metric recording.
+#
+# Dependencies: deploy.yml
+# ============================================================================
+
+name: Post-Deployment
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "Deployed environment"
+        required: true
+        type: string
+      deployed-tag:
+        description: "Deployed image tag"
+        required: true
+        type: string
+      health-endpoint:
+        description: "Health endpoint URL to verify"
+        required: false
+        type: string
+        default: ""
+      smoke-test-command:
+        description: "Shell command for smoke tests"
+        required: false
+        type: string
+        default: ""
+      enable-rollback:
+        description: "Enable automated rollback on verification failure"
+        required: false
+        type: boolean
+        default: false
+      previous-image-tag:
+        description: "Previous stable image tag for rollback"
+        required: false
+        type: string
+        default: ""
+      image-name:
+        description: "Container image name for rollback"
+        required: false
+        type: string
+        default: ""
+      verify-prometheus:
+        description: "Verify Prometheus targets are up after deploy"
+        required: false
+        type: boolean
+        default: false
+      prometheus-url:
+        description: "Prometheus API URL for target verification"
+        required: false
+        type: string
+        default: ""
+      record-dora-metric:
+        description: "Record a DORA deployment metric"
+        required: false
+        type: boolean
+        default: false
+
+    secrets:
+      deploy-token:
+        description: "Token for triggering rollback workflow"
+        required: false
+      prometheus-token:
+        description: "Token for Prometheus API access"
+        required: false
+      dora-ingestion-token:
+        description: "Token for DORA ingestion API"
+        required: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  # ─── Health Check ───────────────────────────────────────────────────────
+  health-check:
+    name: Health Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: inputs.health-endpoint != ''
+    steps:
+      - name: Check health endpoint
+        run: |
+          ENDPOINT="${{ inputs.health-endpoint }}"
+          echo "Checking health endpoint: $ENDPOINT"
+          for i in $(seq 1 10); do
+            HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' "$ENDPOINT" 2>/dev/null || echo "000")
+            if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "204" ]; then
+              echo "✅ Health check passed (HTTP $HTTP_CODE)"
+              exit 0
+            fi
+            echo "Attempt $i: HTTP $HTTP_CODE, retrying..."
+            sleep 5
+          done
+          echo "::error::Health check failed after 10 attempts"
+          exit 1
+
+  # ─── Smoke Tests ────────────────────────────────────────────────────────
+  smoke-tests:
+    name: Smoke Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [health-check]
+    if: |
+      always() &&
+      inputs.smoke-test-command != '' &&
+      (needs.health-check.result == 'success' || inputs.health-endpoint == '')
+    steps:
+      - name: Run smoke tests
+        run: |
+          echo "Running smoke tests for ${{ inputs.environment }}..."
+          if ${{ inputs.smoke-test-command }}; then
+            echo "✅ Smoke tests passed"
+          else
+            echo "::error::Smoke tests FAILED"
+            exit 1
+          fi
+
+  # ─── Prometheus Target Verification ─────────────────────────────────────
+  prometheus-verify:
+    name: Prometheus Targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: inputs.verify-prometheus && inputs.prometheus-url != ''
+    steps:
+      - name: Verify Prometheus targets
+        run: |
+          PROM_URL="${{ inputs.prometheus-url }}"
+          echo "Checking Prometheus targets at $PROM_URL..."
+          RESPONSE=$(curl -s \
+            -H "Authorization: Bearer ${{ secrets.prometheus-token }}" \
+            "$PROM_URL/api/v1/targets" 2>/dev/null)
+          if [ -z "$RESPONSE" ]; then
+            echo "::warning::Could not reach Prometheus API"
+            exit 0
+          fi
+          UNHEALTHY_COUNT=$(echo "$RESPONSE" | jq '[.data.activeTargets // [] | .[] | select(.health != "up")] | length')
+          echo "Unhealthy targets: $UNHEALTHY_COUNT"
+          if [ "$UNHEALTHY_COUNT" -gt 0 ]; then
+            echo "::error::Unhealthy Prometheus targets found"
+            echo "$RESPONSE" | jq -r '.data.activeTargets // [] | .[] | select(.health != "up") | "  \(.labels.job // "unknown"): \(.health)"'
+            exit 1
+          fi
+          echo "✅ All Prometheus targets up"
+
+  # ─── DORA Metric Recording ──────────────────────────────────────────────
+  dora-metric:
+    name: DORA Metric
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    if: inputs.record-dora-metric
+    steps:
+      - name: Record DORA deployment event
+        env:
+          DORA_INGESTION_TOKEN: ${{ secrets.dora-ingestion-token }}
+        run: |
+          echo "Recording DORA deployment metric for ${{ inputs.environment }}..."
+          echo "✅ DORA deployment event recorded (simulated)"
+
+  # ─── Summary ────────────────────────────────────────────────────────────
+  post-deployment-summary:
+    name: Post-Deployment Summary
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    needs: [health-check, smoke-tests, prometheus-verify, dora-metric]
+    if: always()
+    steps:
+      - name: Check results
+        run: |
+          echo "=== Post-Deployment Results ==="
+          echo "Health Check:         ${{ needs.health-check.result }}"
+          echo "Smoke Tests:          ${{ needs.smoke-tests.result }}"
+          echo "Prometheus Targets:   ${{ needs.prometheus-verify.result }}"
+          echo "DORA Metric:          ${{ needs.dora-metric.result }}"
+
+          if [ "${{ needs.health-check.result }}" == "failure" ] || \
+             [ "${{ needs.smoke-tests.result }}" == "failure" ] || \
+             [ "${{ needs.prometheus-verify.result }}" == "failure" ]; then
+            echo ""
+            echo "❌ Post-Deployment FAILED"
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ Post-Deployment PASSED"
+
+      - name: Generate summary
+        if: always()
+        run: |
+          echo "## Post-Deployment Verification: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Health Check | ${{ needs.health-check.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Smoke Tests | ${{ needs.smoke-tests.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Prometheus Targets | ${{ needs.prometheus-verify.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| DORA Metric | ${{ needs.dora-metric.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY

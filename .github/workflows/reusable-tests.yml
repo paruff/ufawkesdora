@@ -79,7 +79,9 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f tests/unit/requirements.txt ]; then
+          if [ -f requirements-test.txt ]; then
+            pip install -r requirements-test.txt
+          elif [ -f tests/unit/requirements.txt ]; then
             pip install -r tests/unit/requirements.txt
           elif [ -f requirements.txt ]; then
             pip install -r requirements.txt
@@ -193,7 +195,9 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f tests/integration/requirements.txt ]; then
+          if [ -f requirements-test.txt ]; then
+            pip install -r requirements-test.txt
+          elif [ -f tests/integration/requirements.txt ]; then
             pip install -r tests/integration/requirements.txt
           elif [ -f requirements.txt ]; then
             pip install -r requirements.txt
