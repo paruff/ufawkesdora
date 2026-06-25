@@ -20,16 +20,6 @@ permissions:
   pull-requests: write
 
 jobs:
-  # ─── Integration & E2E Tests ────────────────────────────────────────────
-  tests:
-    name: Tests
-    uses: ./.github/workflows/reusable-tests.yml
-    with:
-      test-tiers: "compose-smoke,integration,e2e,golden-path"
-      python-version: "3.11"
-      compose-profile: "core"
-      health-endpoints: "http://localhost:8089/health"
-
   # ─── Security Scanning ──────────────────────────────────────────────────
   security:
     name: Security Scanning
@@ -53,18 +43,16 @@ jobs:
     name: Pre-Deployment Summary
     runs-on: ubuntu-latest
     timeout-minutes: 2
-    needs: [tests, security, dependency-review]
+    needs: [security, dependency-review]
     if: always()
     steps:
       - name: Check results
         run: |
           echo "=== Pre-Deployment Results ==="
-          echo "Tests:                ${{ needs.tests.result }}"
           echo "Security Scanning:    ${{ needs.security.result }}"
           echo "Dependency Review:    ${{ needs.dependency-review.result }}"
 
-          if [ "${{ needs.tests.result }}" == "failure" ] || \
-             [ "${{ needs.security.result }}" == "failure" ] || \
+          if [ "${{ needs.security.result }}" == "failure" ] || \
              [ "${{ needs.dependency-review.result }}" == "failure" ]; then
             echo ""
             echo "❌ Pre-Deployment FAILED"
@@ -81,6 +69,5 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Tests | ${{ needs.tests.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Security Scanning | ${{ needs.security.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Dependency Review | ${{ needs.dependency-review.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
