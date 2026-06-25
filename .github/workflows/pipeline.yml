@@ -46,7 +46,11 @@ on:
         default: false
 
 permissions:
-  contents: read
+  # contents: write is required for the deploy phase (Phase 4) to push
+  # GitOps manifest updates. The deploy phase is gated by a manual
+  # workflow_dispatch trigger (inputs.run-deploy) so this broad permission
+  # is only exercised when explicitly requested.
+  contents: write
   pull-requests: write
   security-events: write
   actions: read
