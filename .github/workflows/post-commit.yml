@@ -1,8 +1,9 @@
 # ============================================================================
-# Phase 2: Post-Commit — Build, Unit Tests, and Coverage Gate
+# Phase 2: Post-Commit — Build, Config Validation, Supply Chain
 # ----------------------------------------------------------------------------
-# Compiles/builds the application, validates configurations (OTel, Prometheus,
-# etc.), runs fast unit tests, and enforces the coverage quality gate.
+# Compiles/builds the application and validates configurations (OTel,
+# Prometheus, etc.). Unit tests and coverage gate run in Phase 1 (pre-commit)
+# for faster feedback.
 #
 # Dependencies: pre-commit.yml
 # Followed by: pre-deployment.yml
@@ -28,35 +29,23 @@ jobs:
       validate-tempo: true
       validate-grafana: true
       fail-on-latest: true
-      enable-coverage-gate: true
-      coverage-threshold: 80
-      coverage-paths: "compute,ingestion"
-
-  # ─── Unit Tests ──────────────────────────────────────────────────────────
-  unit-tests:
-    name: Unit Tests
-    uses: ./.github/workflows/reusable-tests.yml
-    with:
-      test-tiers: "unit"
-      python-version: "3.11"
-      unit-test-command: "pytest tests/unit/ -v --tb=short"
+      # Coverage gate runs in Phase 1 (pre-commit), not here
+      enable-coverage-gate: false
 
   # ─── Summary ────────────────────────────────────────────────────────────
   post-commit-summary:
     name: Post-Commit Summary
     runs-on: ubuntu-latest
     timeout-minutes: 2
-    needs: [build-validate, unit-tests]
+    needs: [build-validate]
     if: always()
     steps:
       - name: Check results
         run: |
           echo "=== Post-Commit Results ==="
           echo "Build & Validate:     ${{ needs.build-validate.result }}"
-          echo "Unit Tests:           ${{ needs.unit-tests.result }}"
 
-          if [ "${{ needs.build-validate.result }}" == "failure" ] || \
-             [ "${{ needs.unit-tests.result }}" == "failure" ]; then
+          if [ "${{ needs.build-validate.result }}" == "failure" ]; then
             echo ""
             echo "❌ Post-Commit FAILED"
             exit 1
@@ -73,4 +62,3 @@ jobs:
           echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Build & Validate | ${{ needs.build-validate.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Unit Tests | ${{ needs.unit-tests.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY

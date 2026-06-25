@@ -1,8 +1,9 @@
 # ============================================================================
-# Phase 3: Pre-Deployment — Integration/E2E Tests, Security Scanning, SBOM
+# Phase 3: Pre-Deployment — Integration/E2E/Smoke Tests, Security, Dep Review
 # ----------------------------------------------------------------------------
-# Runs full-stack integration tests, end-to-end tests, security vulnerability
-# scanning, and dependency review before any deployment occurs.
+# Runs the full test suite with Docker-backed integration, smoke, and E2E
+# tests. Also scans for vulnerabilities and reviews dependency changes before
+# any deployment occurs.
 #
 # Dependencies: post-commit.yml
 # Followed by: deploy.yml
@@ -20,7 +21,16 @@ permissions:
   pull-requests: write
 
 jobs:
-  # ─── Security Scanning ──────────────────────────────────────────────────
+  # ─── Integration, Smoke & E2E Tests ─────────────────────────────────────
+  full-tests:
+    name: Full Tests (Integration → Smoke → E2E)
+    uses: ./.github/workflows/ci-tests.yml
+    with:
+      # Unit tests already ran in Phase 1 (pre-commit); skip here to avoid
+      # re-running them. This job runs integration, smoke, and E2E tests.
+      run-unit: false
+
+  # ─── Full Security Scanning ──────────────────────────────────────────────
   security:
     name: Security Scanning
     uses: ./.github/workflows/reusable-security-scanning.yml
@@ -43,16 +53,18 @@ jobs:
     name: Pre-Deployment Summary
     runs-on: ubuntu-latest
     timeout-minutes: 2
-    needs: [security, dependency-review]
+    needs: [full-tests, security, dependency-review]
     if: always()
     steps:
       - name: Check results
         run: |
           echo "=== Pre-Deployment Results ==="
+          echo "Full Tests:           ${{ needs.full-tests.result }}"
           echo "Security Scanning:    ${{ needs.security.result }}"
           echo "Dependency Review:    ${{ needs.dependency-review.result }}"
 
-          if [ "${{ needs.security.result }}" == "failure" ] || \
+          if [ "${{ needs.full-tests.result }}" == "failure" ] || \
+             [ "${{ needs.security.result }}" == "failure" ] || \
              [ "${{ needs.dependency-review.result }}" == "failure" ]; then
             echo ""
             echo "❌ Pre-Deployment FAILED"
@@ -69,5 +81,6 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Full Tests | ${{ needs.full-tests.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Security Scanning | ${{ needs.security.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Dependency Review | ${{ needs.dependency-review.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY

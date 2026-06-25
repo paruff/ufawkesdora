@@ -8,14 +8,24 @@ on:
         required: false
         type: number
         default: 30
+      run-unit:
+        description: "Run unit tests (set false when unit tests already ran in pre-commit)"
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      DATABASE_URL:
+        description: "Database connection string for integration tests"
+        required: false
 
 permissions:
   contents: read
 
 jobs:
-  # ─── Stage 2: Unit Tests (fast, no Docker) ─────────────────────────────────
+  # ─── Unit Tests (fast, no Docker) ──────────────────────────────────────────
   unit-tests:
     name: Unit Tests
+    if: inputs.run-unit
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -33,15 +43,14 @@ jobs:
           else
             echo "No unit tests found, skipping"
           fi
-        continue-on-error: false
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: unit-test-results
           path: coverage.xml
           if-no-files-found: ignore
 
-  # ─── Stage 3a: Integration Tests (Docker-compose stack) ────────────────────
+  # ─── Integration Tests (Docker-compose stack) ─────────────────────────────
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest
@@ -75,17 +84,15 @@ jobs:
       - name: Run integration tests (DB schema)
         run: |
           pytest tests/integration/test_schema.py -v --tb=short
-        continue-on-error: false
       - name: Run integration tests (metrics)
         run: |
           pytest tests/integration/test_metrics_integration.py -v --tb=short
-        continue-on-error: false
       - name: Dump logs on failure
         if: failure()
         run: |
           docker compose -f docker-compose.integration.yml logs > integration.log
           echo "Container logs dumped to integration.log"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: integration-logs
@@ -94,11 +101,11 @@ jobs:
         if: always()
         run: docker compose -f docker-compose.integration.yml down -v
 
-  # ─── Stage 3b: Smoke Tests ─────────────────────────────────────────────────
+  # ─── Smoke Tests ──────────────────────────────────────────────────────────
   smoke-tests:
     name: Smoke Tests
     runs-on: ubuntu-latest
-    needs: [unit-tests, integration-tests]
+    needs: [integration-tests]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -127,7 +134,7 @@ jobs:
       - name: Dump logs on failure
         if: failure()
         run: docker compose -f docker-compose.test.yml logs > smoke-test.log
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: smoke-logs
@@ -136,7 +143,7 @@ jobs:
         if: always()
         run: docker compose -f docker-compose.test.yml down -v
 
-  # ─── Stage 3c: End-to-End Tests ────────────────────────────────────────────
+  # ─── End-to-End Tests ─────────────────────────────────────────────────────
   e2e-tests:
     name: E2E Tests
     runs-on: ubuntu-latest
@@ -170,7 +177,7 @@ jobs:
         if: failure()
         run: |
           docker compose -f docker-compose.test.yml logs > e2e-test.log
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: e2e-logs
@@ -179,7 +186,7 @@ jobs:
         if: always()
         run: docker compose -f docker-compose.test.yml down -v
 
-  # ─── Test Summary ──────────────────────────────────────────────────────────
+  # ─── Test Summary ─────────────────────────────────────────────────────────
   test-summary:
     name: Test Summary
     runs-on: ubuntu-latest
@@ -210,7 +217,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Tier | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Unit | ${{ needs.unit-tests.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Unit | ${{ needs.unit-tests.result == 'success' && '✅ Pass' || needs.unit-tests.result == 'skipped' && '⏭️ Skipped' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Integration | ${{ needs.integration-tests.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Smoke | ${{ needs.smoke-tests.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| E2E | ${{ needs.e2e-tests.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY

@@ -54,6 +54,9 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          # Full history required for Gitleaks to resolve commit ranges
+          fetch-depth: 0
 
       # ─── Secret Scanning (Gitleaks) ─────────────────────────────────────
       - name: Run secret scanning
