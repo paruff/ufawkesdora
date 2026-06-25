@@ -128,9 +128,9 @@ class TestSchemaValidity:
     def test_all_schemas_have_additional_properties_false(self):
         """All schemas should reject unknown fields."""
         for name, schema in load_all_schemas().items():
-            assert (
-                schema.get("additionalProperties") is False
-            ), f"{name} should set additionalProperties: false"
+            assert schema.get("additionalProperties") is False, (
+                f"{name} should set additionalProperties: false"
+            )
 
 
 # ── Deployment Event ───────────────────────────────────────────────────────────

@@ -46,9 +46,9 @@ class TestWorkflowValidation:
                 jobs = config.get("jobs", {})
                 for job_name, job_config in jobs.items():
                     if isinstance(job_config, dict):
-                        assert (
-                            "runs-on" in job_config or "uses" in job_config
-                        ), f"{f.name} job '{job_name}' missing 'runs-on' or 'uses'"
+                        assert "runs-on" in job_config or "uses" in job_config, (
+                            f"{f.name} job '{job_name}' missing 'runs-on' or 'uses'"
+                        )
 
     def test_no_hardcoded_secrets(self, workflow_files):
         """Workflows must not contain hardcoded secrets."""
@@ -65,9 +65,9 @@ class TestWorkflowValidation:
             with open(f) as fh:
                 content = fh.read()
                 for pattern in sensitive_patterns:
-                    assert (
-                        pattern.lower() not in content.lower()
-                    ), f"{f.name} contains hardcoded secret: {pattern}"
+                    assert pattern.lower() not in content.lower(), (
+                        f"{f.name} contains hardcoded secret: {pattern}"
+                    )
 
     def test_use_official_actions(self, workflow_files):
         """Workflows should use official GitHub actions or well-known third-party actions."""
