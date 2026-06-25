@@ -420,9 +420,14 @@ jobs:
             FAIL=1
           fi
 
-          # Architecture doc — either location
-          if [ ! -f "ARCHITECTURE.md" ] && [ ! -f "docs/ARCHITECTURE.md" ]; then
-            echo "WARNING: ARCHITECTURE.md not found (check docs/ too)"
+          # Architecture/design/spec doc — check multiple locations
+          if [ ! -f "ARCHITECTURE.md" ] && \
+             [ ! -f "docs/ARCHITECTURE.md" ] && \
+             [ ! -f "docs/design/design.md" ] && \
+             [ ! -f "docs/spec/specification.md" ]; then
+            echo "WARNING: No architecture/design/spec doc found"
+            echo "  Expected one of: ARCHITECTURE.md, docs/ARCHITECTURE.md,"
+            echo "  docs/design/design.md, docs/spec/specification.md"
           fi
 
           # tests/README.md
