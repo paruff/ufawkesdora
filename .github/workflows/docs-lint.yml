@@ -1,10 +1,6 @@
 name: Documentation Lint
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
   workflow_call:
 
 jobs:
@@ -12,7 +8,7 @@ jobs:
     name: Required files present
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check required files exist and are not placeholders
         run: |
@@ -72,7 +68,7 @@ jobs:
     name: Markdown lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: DavidAnson/markdownlint-cli2-action@v16
         with:
           globs: "**/*.md"
@@ -81,9 +77,8 @@ jobs:
   link-check:
     name: Check links
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: lycheeverse/lychee-action@v2
         with:
           args: >
