@@ -1,0 +1,44 @@
+# ============================================================================
+# Scheduled Maintenance — Weekly Tasks
+# ============================================================================
+#
+# Runs periodic maintenance tasks on a schedule and on-demand via
+# workflow_dispatch. Each job declares its own minimal permissions.
+#
+# Jobs:
+#   pre-commit-autoupdate  — Updates pre-commit hook versions every Monday
+#                            and opens a PR if changes are detected.
+# ============================================================================
+
+name: Scheduled Maintenance
+
+on:
+  schedule:
+    # Every Monday at 09:00 UTC — avoids peak hours.
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+jobs:
+  pre-commit-autoupdate:
+    name: Weekly pre-commit autoupdate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pre-commit
+        run: pip install pre-commit
+      - name: Run autoupdate
+        run: pre-commit autoupdate
+      - name: Create PR if changes exist
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "chore(pre-commit): autoupdate hook versions"
+          title: "chore(pre-commit): weekly hook version update"
+          branch: chore/pre-commit-autoupdate
+          labels: "type-chore,comp-pre-commit"
