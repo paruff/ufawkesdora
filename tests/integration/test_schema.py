@@ -55,9 +55,7 @@ def execute_sql_file(cursor, filepath: Path, dbname: str = None):
             cursor.execute(stmt)
         except Exception as e:
             raise RuntimeError(
-                f"Error executing statement from {filepath.name}:\n"
-                f"{stmt[:200]}...\n"
-                f"Error: {e}"
+                f"Error executing statement from {filepath.name}:\n{stmt[:200]}...\nError: {e}"
             ) from e
 
 
@@ -325,9 +323,9 @@ class TestSchema:
         assert result is not None, f"'{hypertable_name}' is not a hypertable"
         actual_name, actual_interval = result
         assert actual_name == hypertable_name
-        assert (
-            expected_chunk_interval in str(actual_interval).lower()
-        ), f"Expected chunk interval '{expected_chunk_interval}', got '{actual_interval}'"
+        assert expected_chunk_interval in str(actual_interval).lower(), (
+            f"Expected chunk interval '{expected_chunk_interval}', got '{actual_interval}'"
+        )
 
     # ── Role verification ─────────────────────────────────────────────────
 
@@ -337,9 +335,9 @@ class TestSchema:
         role = db_cursor.fetchone()
         assert role is not None, "Role 'dora_app' does not exist"
         role_name, is_super = role
-        assert (
-            not is_super
-        ), "dora_app role has superuser privileges — violates least-privilege policy"
+        assert not is_super, (
+            "dora_app role has superuser privileges — violates least-privilege policy"
+        )
 
     # ── Permission verification ───────────────────────────────────────────
 

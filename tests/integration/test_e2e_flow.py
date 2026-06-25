@@ -130,8 +130,7 @@ def test_e2e_full_pipeline():
     time.sleep(5)
     event_count = _count_raw_events()
     assert event_count >= 2, (
-        f"Expected >= 2 raw events, got {event_count}. "
-        "Worker may not have processed the queue yet."
+        f"Expected >= 2 raw events, got {event_count}. Worker may not have processed the queue yet."
     )
     print(f"[e2e] {event_count} raw events found (expected >= 2)")
 

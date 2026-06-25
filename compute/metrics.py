@@ -655,12 +655,12 @@ def _print_table(results: list[dict]):
         )
         fdrt = f"{r.get('fdrt_p50_hours', 0):.1f}" if r.get("fdrt_p50_hours") is not None else "N/A"
         cfr = (
-            f"{r.get('change_failure_rate', 0)*100:.1f}"
+            f"{r.get('change_failure_rate', 0) * 100:.1f}"
             if r.get("change_failure_rate") is not None
             else "N/A"
         )
         rr = (
-            f"{r.get('rework_rate_pct', 0)*100:.1f}"
+            f"{r.get('rework_rate_pct', 0) * 100:.1f}"
             if r.get("rework_rate_pct") is not None
             else "N/A"
         )

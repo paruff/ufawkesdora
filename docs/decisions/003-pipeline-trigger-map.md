@@ -8,7 +8,7 @@
 ## 1. Trigger Map
 
 | # | File | Trigger Events | Jobs Defined | Calls / U uses |
-|---|------|---------------|--------------|----------------|
+| --- | ------ | --------------- | -------------- | ---------------- |
 | 1 | `pipeline.yml` | `pull_request [main]`, `push [main]`, `workflow_dispatch` | `pre-commit`, `post-commit`, `pre-deployment`, `deploy`, `post-deployment`, `pipeline-complete` | → `pre-commit.yml`, `post-commit.yml`, `pre-deployment.yml`, `deploy.yml`, `post-deployment.yml` |
 | 2 | `ci.yml` | `pull_request [main]`, `push [main]`, `workflow_dispatch` | `validate` (pre-commit hooks only) | — (inline only) |
 | 3 | `compute-metrics.yml` | `schedule (0 6 \* \* \*)`, `workflow_dispatch` | `compute-metrics` | — (inline only) |

@@ -158,9 +158,9 @@ class TestDeploymentCollector:
         canonical = transform_deployment_webhook(fixture)
 
         for key in expected:
-            assert (
-                canonical.get(key) == expected[key]
-            ), f"Field '{key}': expected {expected[key]}, got {canonical.get(key)}"
+            assert canonical.get(key) == expected[key], (
+                f"Field '{key}': expected {expected[key]}, got {canonical.get(key)}"
+            )
 
     def test_required_fields_present(self):
         """All required deployment schema fields are present."""
@@ -170,9 +170,9 @@ class TestDeploymentCollector:
 
         required = schema.get("required", [])
         for field in required:
-            assert (
-                field in canonical and canonical[field] is not None
-            ), f"Required field '{field}' missing in transformed event"
+            assert field in canonical and canonical[field] is not None, (
+                f"Required field '{field}' missing in transformed event"
+            )
 
     def test_event_type_is_deployment(self):
         """event_type must be 'deployment'."""
@@ -214,9 +214,9 @@ class TestPRCollector:
         canonical = transform_pr_webhook(fixture)
 
         for key in expected:
-            assert (
-                canonical.get(key) == expected[key]
-            ), f"Field '{key}': expected {expected[key]}, got {canonical.get(key)}"
+            assert canonical.get(key) == expected[key], (
+                f"Field '{key}': expected {expected[key]}, got {canonical.get(key)}"
+            )
 
     def test_required_fields_present(self):
         """All required PR schema fields are present."""
@@ -226,9 +226,9 @@ class TestPRCollector:
 
         required = schema.get("required", [])
         for field in required:
-            assert (
-                field in canonical and canonical[field] is not None
-            ), f"Required field '{field}' missing in transformed event"
+            assert field in canonical and canonical[field] is not None, (
+                f"Required field '{field}' missing in transformed event"
+            )
 
     def test_event_type_is_pr(self):
         """event_type must be 'pr'."""
