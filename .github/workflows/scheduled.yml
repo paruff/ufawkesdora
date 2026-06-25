@@ -1,5 +1,5 @@
 # ============================================================================
-# Scheduled Maintenance — Weekly Tasks
+# Scheduled Maintenance — Periodic Tasks
 # ============================================================================
 #
 # Runs periodic maintenance tasks on a schedule and on-demand via
@@ -8,27 +8,43 @@
 # Jobs:
 #   pre-commit-autoupdate  — Updates pre-commit hook versions every Monday
 #                            and opens a PR if changes are detected.
+#   compute-dora-metrics   — Daily DORA metrics computation from TimescaleDB.
 # ============================================================================
 
 name: Scheduled Maintenance
 
 on:
   schedule:
-    # Every Monday at 09:00 UTC — avoids peak hours.
+    # Every Monday at 09:00 UTC — pre-commit autoupdate
     - cron: "0 9 * * 1"
+    # Daily at 06:00 UTC — DORA metrics computation
+    - cron: "0 6 * * *"
   workflow_dispatch:
+    inputs:
+      window:
+        description: "Days to look back for metrics (default: 30)"
+        required: false
+        type: number
+        default: 30
+      team:
+        description: "Team filter (e.g. paruff/uFawkesObs, 'all' for all)"
+        required: false
+        type: string
+        default: all
 
 jobs:
+  # ─── Pre-commit Autoupdate ──────────────────────────────────────────
   pre-commit-autoupdate:
     name: Weekly pre-commit autoupdate
+    if: github.event_name != 'schedule' || github.event.schedule == '0 9 * * 1'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install pre-commit
@@ -42,3 +58,52 @@ jobs:
           title: "chore(pre-commit): weekly hook version update"
           branch: chore/pre-commit-autoupdate
           labels: "type-chore,comp-pre-commit"
+
+  # ─── Compute DORA Metrics ───────────────────────────────────────────
+  compute-dora-metrics:
+    name: Compute DORA Metrics
+    if: github.event_name != 'schedule' || github.event.schedule == '0 6 * * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: DORA job start
+        run: |
+          echo "job-start:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "sha:${{ github.sha }}"
+          echo "workflow:${{ github.workflow }}"
+          echo "job:${{ github.job }}"
+
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r compute/requirements.txt
+
+      - name: Compute DORA metrics
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          ARGS="--window ${{ inputs.window || 30 }}"
+          ARGS="$ARGS --team ${{ inputs.team || 'all' }}"
+
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            ARGS="$ARGS --verbose"
+          fi
+
+          if [ -n "${{ secrets.PUSHGATEWAY_URL }}" ]; then
+            ARGS="$ARGS --pushgateway ${{ secrets.PUSHGATEWAY_URL }}"
+          fi
+
+          python compute/metrics.py $ARGS
+
+      - name: DORA job finish
+        if: always()
+        run: echo "job-finish:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
