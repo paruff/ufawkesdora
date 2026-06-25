@@ -70,14 +70,20 @@ jobs:
             } catch (error) {
               const status = error.status;
               if (status === 403 || status === 404) {
-                core.warning(
-                  `Dependency graph not enabled for ${context.repo.owner}/${context.repo.repo}; skipping (status: ${status}).`
-                );
                 core.setOutput('enabled', 'false');
                 return;
               }
               throw error;
             }
+
+      - name: Fail if dependency graph is disabled
+        if: steps.dependency-graph.outputs.enabled == 'false'
+        run: |
+          echo "::error::Dependency graph is not enabled for this repository."
+          echo "::error::The dependency-review-action requires the dependency graph to be enabled."
+          echo "::error::To fix this, go to: https://github.com/${{ github.repository }}/settings/security_analysis"
+          echo "::error::Or remove the dependency-review job from your workflow if you don't need it."
+          exit 1
 
       - name: Determine refs
         id: refs

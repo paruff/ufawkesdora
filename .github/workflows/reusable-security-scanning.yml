@@ -63,13 +63,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_SUMMARY: true
-        continue-on-error: true
 
       - name: Check gitleaks results
         if: steps.gitleaks.outcome == 'failure'
         run: |
-          echo "::warning::Gitleaks detected potential secrets. Check the Security tab for details."
-          # Don't fail the job - gitleaks may find false positives in test fixtures
+          echo "::error::Gitleaks detected potential secrets that are not in the allowlist."
+          echo "::error::Review findings in the Security tab or update .gitleaks.toml to allowlist false positives."
+          exit 1
 
       # ─── Vulnerability Scanning (Trivy FS) ─────────────────────────────
       - name: Run Trivy vulnerability scanner
