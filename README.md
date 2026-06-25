@@ -82,6 +82,11 @@ flowchart LR
 │   ├── init/              #   Idempotent init scripts (00, 01, 02)
 │   ├── migrations/        #   Forward-only numbered migrations (001-003)
 │   └── timescaledb/       #   Hypertable conversion SQL
+├── docs/                  # Planning & discovery artifacts
+│   ├── spec/              #   Feature specifications
+│   ├── design/            #   Technical designs
+│   ├── plan/              #   Task plans and decomposition
+│   └── discovery/         #   User research discovery briefs
 ├── events/                # Canonical event JSON Schemas (Draft-07)
 ├── ingestion/
 │   ├── api/               #   FastAPI ingestion endpoint

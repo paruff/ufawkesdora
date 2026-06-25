@@ -24,3 +24,14 @@ This repo supports these agent invocation types:
 - **design**: Translate specs into architecture and component definitions
 - **discover**: Pre-spec user research; produce discovery briefs
 - **release**: Execute weekly release checklist (CHANGELOG, tag, GitHub Release)
+
+## Artifact Locations
+
+Planning and research artifacts live under `docs/` for discoverability by both humans and AI agents:
+
+| Artifact         | Location                            | Created By     |
+| ---------------- | ----------------------------------- | -------------- |
+| Specification    | `docs/spec/specification.md`        | spec agent     |
+| Technical Design | `docs/design/design.md`             | design agent   |
+| Task Plan        | `docs/plan/plan.md`                 | plan agent     |
+| Discovery Brief  | `docs/discovery/discovery-brief.md` | discover agent |
