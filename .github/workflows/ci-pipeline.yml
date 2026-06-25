@@ -1,0 +1,105 @@
+name: CI Pipeline
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+
+concurrency:
+  group: pipeline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─── Stage 0: Pre-flight ──────────────────────────────────────────────────
+  preflight:
+    name: Pre-flight
+    uses: ./.github/workflows/reusable-preflight.yml
+    with:
+      pr-size-limit: 0
+
+  # ─── Stage 1: Static Analysis (Lint) ────────────────────────────────────
+  lint:
+    name: Static Analysis
+    needs: [preflight]
+    uses: ./.github/workflows/reusable-lint.yml
+
+  # ─── Stage 2: Security Scanning ─────────────────────────────────────────
+  security:
+    name: Security Scanning
+    needs: [lint]
+    uses: ./.github/workflows/reusable-security-scanning.yml
+    with:
+      scan-type: all
+      severity-threshold: MEDIUM
+      fail-on-critical: true
+      upload-sarif: true
+
+  # ─── Stage 2b: Dependency Review ────────────────────────────────────────
+  dependency-review:
+    name: Dependency Review
+    needs: [lint]
+    uses: ./.github/workflows/reusable-dependency-review.yml
+    with:
+      fail-on-severity: high
+      comment-summary-in-pr: "true"
+
+  # ─── Stage 3: Build & Validate ─────────────────────────────────────────
+  build:
+    name: Build & Validate
+    needs: [security, dependency-review]
+    uses: ./.github/workflows/reusable-build.yml
+    with:
+      fail-on-latest: true
+      enable-coverage-gate: true
+      coverage-threshold: 80
+      coverage-paths: "compute,ingestion"
+
+  # ─── Stage 4: Tests ────────────────────────────────────────────────────
+  tests:
+    name: Tests
+    needs: [build]
+    uses: ./.github/workflows/ci-tests.yml
+
+  # ─── Gate: Pipeline Complete ────────────────────────────────────────────
+  pipeline-complete:
+    name: Pipeline Complete
+    needs: [preflight, lint, security, dependency-review, build, tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check results
+        run: |
+          echo "=== Pipeline Results ==="
+          echo "Preflight:          ${{ needs.preflight.result }}"
+          echo "Static Analysis:    ${{ needs.lint.result }}"
+          echo "Security Scanning:  ${{ needs.security.result }}"
+          echo "Dependency Review:  ${{ needs.dependency-review.result }}"
+          echo "Build & Validate:   ${{ needs.build.result }}"
+          echo "Tests:              ${{ needs.tests.result }}"
+
+          if [ "${{ needs.preflight.result }}" == "failure" ] || \
+             [ "${{ needs.lint.result }}" == "failure" ] || \
+             [ "${{ needs.security.result }}" == "failure" ] || \
+             [ "${{ needs.dependency-review.result }}" == "failure" ] || \
+             [ "${{ needs.build.result }}" == "failure" ] || \
+             [ "${{ needs.tests.result }}" == "failure" ]; then
+            echo ""
+            echo "❌ Pipeline FAILED"
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ Pipeline PASSED"
+
+      - name: DORA pipeline finish
+        if: always()
+        run: |
+          echo "pipeline-finish:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "pipeline-result:${{ contains(needs.*.result, 'failure') && 'failure' || 'success' }}"
