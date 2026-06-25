@@ -1,6 +1,6 @@
 # uFawkesDORA
 
-[![CI Pipeline](https://github.com/paruff/ufawkesdora/actions/workflows/ci-pipeline.yml/badge.svg)](https://github.com/paruff/ufawkesdora/actions/workflows/ci-pipeline.yml)
+[![Pipeline](https://github.com/paruff/ufawkesdora/actions/workflows/pipeline.yml/badge.svg)](https://github.com/paruff/ufawkesdora/actions/workflows/pipeline.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ---
