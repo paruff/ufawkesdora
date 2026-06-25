@@ -1,8 +1,9 @@
 # ============================================================================
-# Phase 1: Pre-Commit — Static Analysis, Linting, Pre-Flight Checks
+# Phase 1: Pre-Commit — Static Analysis, Linting, Unit Tests, Security
 # ----------------------------------------------------------------------------
 # Fast checks that run before any build work. Catches formatting, quality,
-# and security issues immediately. Runs in parallel where possible.
+# test failures, and security issues immediately. Runs in parallel where
+# possible to provide the fastest possible feedback loop.
 #
 # Dependencies: None (runs first)
 # Followed by: post-commit.yml
@@ -17,6 +18,7 @@ on:
 permissions:
   contents: read
   pull-requests: read
+  security-events: write
 
 jobs:
   # ─── Pre-Flight ──────────────────────────────────────────────────────────
@@ -36,12 +38,45 @@ jobs:
     name: Static Analysis
     uses: ./.github/workflows/reusable-lint.yml
 
+  # ─── Unit Tests + Coverage Gate ─────────────────────────────────────────
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-test.txt
+
+      - name: Run unit tests with coverage gate (≥80%)
+        run: |
+          pytest tests/unit/ -v --tb=short \
+            --cov=compute --cov=ingestion \
+            --cov-report=term-missing \
+            --cov-fail-under=80
+
+  # ─── Security Scanning ──────────────────────────────────────────────────
+  security:
+    name: Security Scanning
+    uses: ./.github/workflows/reusable-security-scanning.yml
+    with:
+      scan-type: secrets
+      upload-sarif: false
+
   # ─── Summary ────────────────────────────────────────────────────────────
   pre-commit-summary:
     name: Pre-Commit Summary
     runs-on: ubuntu-latest
     timeout-minutes: 2
-    needs: [preflight, docs-lint, lint]
+    needs: [preflight, docs-lint, lint, unit-tests, security]
     if: always()
     steps:
       - name: Check results
@@ -50,10 +85,14 @@ jobs:
           echo "Pre-flight Checks:    ${{ needs.preflight.result }}"
           echo "Documentation Lint:   ${{ needs.docs-lint.result }}"
           echo "Static Analysis:      ${{ needs.lint.result }}"
+          echo "Unit Tests:           ${{ needs.unit-tests.result }}"
+          echo "Security Scanning:    ${{ needs.security.result }}"
 
           if [ "${{ needs.preflight.result }}" == "failure" ] || \
              [ "${{ needs.docs-lint.result }}" == "failure" ] || \
-             [ "${{ needs.lint.result }}" == "failure" ]; then
+             [ "${{ needs.lint.result }}" == "failure" ] || \
+             [ "${{ needs.unit-tests.result }}" == "failure" ] || \
+             [ "${{ needs.security.result }}" == "failure" ]; then
             echo ""
             echo "❌ Pre-Commit FAILED"
             exit 1
@@ -72,3 +111,5 @@ jobs:
           echo "| Pre-flight | ${{ needs.preflight.result == 'success' && '✅ Pass' || needs.preflight.result == 'skipped' && '⏭️ Skipped' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Documentation Lint | ${{ needs.docs-lint.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Static Analysis | ${{ needs.lint.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Unit Tests (≥80% cov) | ${{ needs.unit-tests.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Security Scanning | ${{ needs.security.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY

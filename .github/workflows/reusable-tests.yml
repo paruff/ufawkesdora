@@ -133,7 +133,7 @@ jobs:
           chmod -R 777 data/
 
       - name: Build and start stack
-        run: docker compose --profile ${{ inputs.compose-profile }} up -d --build
+        run: docker compose -f ${{ inputs.compose-file }} --profile ${{ inputs.compose-profile }} up -d --build
 
       - name: Wait for services
         run: sleep 90
@@ -157,12 +157,12 @@ jobs:
       - name: Show logs on failure
         if: failure()
         run: |
-          docker compose ps
-          docker compose logs --tail=50
+          docker compose -f ${{ inputs.compose-file }} ps
+          docker compose -f ${{ inputs.compose-file }} logs --tail=50
 
       - name: Shutdown
         if: always()
-        run: docker compose --profile ${{ inputs.compose-profile }} down -v
+        run: docker compose -f ${{ inputs.compose-file }} --profile ${{ inputs.compose-profile }} down -v
 
       - name: DORA job finish
         if: always()
@@ -209,7 +209,7 @@ jobs:
           chmod -R 777 data/
 
       - name: Start observability stack
-        run: docker compose --profile ${{ inputs.compose-profile }} up -d --build
+        run: docker compose -f ${{ inputs.compose-file }} --profile ${{ inputs.compose-profile }} up -d --build
 
       - name: Wait for services
         run: sleep 90
@@ -220,12 +220,12 @@ jobs:
       - name: Show logs on failure
         if: failure()
         run: |
-          docker compose ps
-          docker compose logs --tail=50
+          docker compose -f ${{ inputs.compose-file }} ps
+          docker compose -f ${{ inputs.compose-file }} logs --tail=50
 
       - name: Shutdown
         if: always()
-        run: docker compose --profile ${{ inputs.compose-profile }} down -v
+        run: docker compose -f ${{ inputs.compose-file }} --profile ${{ inputs.compose-profile }} down -v
 
       - name: Upload test results
         if: always()
@@ -263,7 +263,7 @@ jobs:
       - name: Check for app services
         id: check_apps
         run: |
-          if grep -q '"8080:8080"' compose.yaml 2>/dev/null; then
+          if grep -q '"8080:8080"' ${{ inputs.compose-file }} 2>/dev/null; then
             echo "has_apps=true" >> $GITHUB_OUTPUT
           else
             echo "has_apps=false" >> $GITHUB_OUTPUT
@@ -274,7 +274,7 @@ jobs:
         run: |
           mkdir -p data/prometheus data/grafana
           chmod -R 777 data/
-          docker compose --profile core --profile apps up -d --build
+          docker compose -f ${{ inputs.compose-file }} --profile core --profile apps up -d --build
 
       - name: Wait
         if: steps.check_apps.outputs.has_apps == 'true'
@@ -289,7 +289,7 @@ jobs:
 
       - name: Shutdown
         if: always() && steps.check_apps.outputs.has_apps == 'true'
-        run: docker compose down -v
+        run: docker compose -f ${{ inputs.compose-file }} down -v
 
       - name: Skip
         if: steps.check_apps.outputs.has_apps == 'false'
