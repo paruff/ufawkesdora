@@ -1,0 +1,74 @@
+# ============================================================================
+# Phase 1: Pre-Commit — Static Analysis, Linting, Pre-Flight Checks
+# ----------------------------------------------------------------------------
+# Fast checks that run before any build work. Catches formatting, quality,
+# and security issues immediately. Runs in parallel where possible.
+#
+# Dependencies: None (runs first)
+# Followed by: post-commit.yml
+# ============================================================================
+
+name: Pre-Commit
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  # ─── Pre-Flight ──────────────────────────────────────────────────────────
+  preflight:
+    name: Pre-flight Checks
+    uses: ./.github/workflows/reusable-preflight.yml
+    with:
+      pr-size-limit: 0
+
+  # ─── Documentation Lint ─────────────────────────────────────────────────
+  docs-lint:
+    name: Documentation Lint
+    uses: ./.github/workflows/docs-lint.yml
+
+  # ─── Static Analysis (Lint) ─────────────────────────────────────────────
+  lint:
+    name: Static Analysis
+    uses: ./.github/workflows/reusable-lint.yml
+
+  # ─── Summary ────────────────────────────────────────────────────────────
+  pre-commit-summary:
+    name: Pre-Commit Summary
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    needs: [preflight, docs-lint, lint]
+    if: always()
+    steps:
+      - name: Check results
+        run: |
+          echo "=== Pre-Commit Results ==="
+          echo "Pre-flight Checks:    ${{ needs.preflight.result }}"
+          echo "Documentation Lint:   ${{ needs.docs-lint.result }}"
+          echo "Static Analysis:      ${{ needs.lint.result }}"
+
+          if [ "${{ needs.preflight.result }}" == "failure" ] || \
+             [ "${{ needs.docs-lint.result }}" == "failure" ] || \
+             [ "${{ needs.lint.result }}" == "failure" ]; then
+            echo ""
+            echo "❌ Pre-Commit FAILED"
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ Pre-Commit PASSED"
+
+      - name: Generate summary
+        if: always()
+        run: |
+          echo "## Pre-Commit Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Pre-flight | ${{ needs.preflight.result == 'success' && '✅ Pass' || needs.preflight.result == 'skipped' && '⏭️ Skipped' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Documentation Lint | ${{ needs.docs-lint.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Static Analysis | ${{ needs.lint.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY

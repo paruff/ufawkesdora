@@ -1,0 +1,76 @@
+# ============================================================================
+# Phase 2: Post-Commit — Build, Unit Tests, and Coverage Gate
+# ----------------------------------------------------------------------------
+# Compiles/builds the application, validates configurations (OTel, Prometheus,
+# etc.), runs fast unit tests, and enforces the coverage quality gate.
+#
+# Dependencies: pre-commit.yml
+# Followed by: pre-deployment.yml
+# ============================================================================
+
+name: Post-Commit
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ─── Build & Config Validation ───────────────────────────────────────────
+  build-validate:
+    name: Build & Validate
+    uses: ./.github/workflows/reusable-build.yml
+    with:
+      validate-prometheus: true
+      validate-otel: true
+      validate-tempo: true
+      validate-grafana: true
+      fail-on-latest: true
+      enable-coverage-gate: true
+      coverage-threshold: 80
+      coverage-paths: "compute,ingestion"
+
+  # ─── Unit Tests ──────────────────────────────────────────────────────────
+  unit-tests:
+    name: Unit Tests
+    uses: ./.github/workflows/reusable-tests.yml
+    with:
+      test-tiers: "unit"
+      python-version: "3.11"
+      unit-test-command: "pytest tests/unit/ -v --tb=short"
+
+  # ─── Summary ────────────────────────────────────────────────────────────
+  post-commit-summary:
+    name: Post-Commit Summary
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    needs: [build-validate, unit-tests]
+    if: always()
+    steps:
+      - name: Check results
+        run: |
+          echo "=== Post-Commit Results ==="
+          echo "Build & Validate:     ${{ needs.build-validate.result }}"
+          echo "Unit Tests:           ${{ needs.unit-tests.result }}"
+
+          if [ "${{ needs.build-validate.result }}" == "failure" ] || \
+             [ "${{ needs.unit-tests.result }}" == "failure" ]; then
+            echo ""
+            echo "❌ Post-Commit FAILED"
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ Post-Commit PASSED"
+
+      - name: Generate summary
+        if: always()
+        run: |
+          echo "## Post-Commit Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Build & Validate | ${{ needs.build-validate.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Unit Tests | ${{ needs.unit-tests.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
