@@ -1,0 +1,81 @@
+# ============================================================================
+# Compute Archetypes — Monthly Team Classification
+# ============================================================================
+#
+# Runs the seven-archetype classifier for all teams monthly, after the
+# compute-metrics workflow has completed and pushed fresh metrics.
+#
+# Reads from:
+#   - dora_snapshots (latest snapshot per team)
+#   - wellbeing_surveys (current quarter's scores)
+# Writes to:
+#   - archetype_history (classification results)
+# ============================================================================
+
+name: Compute Archetypes
+
+on:
+  schedule:
+    # Monthly on the 1st at 07:00 UTC — after compute-metrics runs daily at 06:00
+    - cron: "0 7 1 * *"
+  workflow_dispatch:
+    inputs:
+      team:
+        description: "Team filter (e.g. paruff/uFawkesObs, 'all' for all)"
+        required: false
+        type: string
+        default: all
+      quarter:
+        description: "Quarter string (e.g. 2026-Q2). Defaults to current quarter."
+        required: false
+        type: string
+        default: ""
+
+permissions: {}  # deny all at workflow level; grant per job below
+
+jobs:
+  compute-archetypes:
+    name: Compute Archetype Classifications
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: DORA job start
+        run: |
+          echo "job-start:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "sha:${{ github.sha }}"
+          echo "workflow:${{ github.workflow }}"
+          echo "job:${{ github.job }}"
+
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.1.1
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r compute/requirements.txt
+
+      - name: Compute archetype classifications
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          ARGS="--team ${{ inputs.team || 'all' }}"
+
+          if [ -n "${{ inputs.quarter }}" ]; then
+            ARGS="$ARGS --quarter ${{ inputs.quarter }}"
+          fi
+
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            ARGS="$ARGS --verbose"
+          fi
+
+          python compute/archetype.py $ARGS --json
+
+      - name: DORA job finish
+        if: always()
+        run: echo "job-finish:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
