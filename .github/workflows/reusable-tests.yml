@@ -47,12 +47,12 @@ on:
         description: "Docker Compose profile to use"
         required: false
         type: string
-        default: "core"
+        default: ""
       compose-file:
         description: "Docker Compose file path"
         required: false
         type: string
-        default: "compose.yaml"
+        default: "docker-compose.test.yml"
       health-endpoints:
         description: "Comma-separated health endpoints to verify"
         required: false
@@ -155,7 +155,13 @@ jobs:
           chmod -R 777 data/
 
       - name: Build and start stack
-        run: docker compose -f ${{ inputs.compose-file }} --profile ${{ inputs.compose-profile }} up -d --build
+        run: |
+          PROFILE="${{ inputs.compose-profile }}"
+          if [ -n "$PROFILE" ]; then
+            docker compose -f ${{ inputs.compose-file }} --profile "$PROFILE" up -d --build
+          else
+            docker compose -f ${{ inputs.compose-file }} up -d --build
+          fi
 
       - name: Wait for services
         run: sleep 90
@@ -184,7 +190,13 @@ jobs:
 
       - name: Shutdown
         if: always()
-        run: docker compose -f ${{ inputs.compose-file }} --profile ${{ inputs.compose-profile }} down -v
+        run: |
+          PROFILE="${{ inputs.compose-profile }}"
+          if [ -n "$PROFILE" ]; then
+            docker compose -f ${{ inputs.compose-file }} --profile "$PROFILE" down -v
+          else
+            docker compose -f ${{ inputs.compose-file }} down -v
+          fi
 
       - name: DORA job finish
         if: always()
@@ -436,7 +448,7 @@ jobs:
           fi
 
           # Placeholder check
-          if grep -rn "[Add contribution guidelines here]" --include="*.md" . | grep -v ".git"; then
+          if grep -rn "\[Add contribution guidelines here\]" --include="*.md" . | grep -v ".git"; then
             echo "CONTRIBUTING.md is still a placeholder"
             FAIL=1
           fi
@@ -447,7 +459,7 @@ jobs:
           fi
 
           # README required sections
-          for section in "## Status" "## Quick Start\|Getting Started\|## Install" "## Test"; do
+          for section in "## Status" "## Quick Start|Getting Started|## Install" "## Test"; do
             if ! grep -qE "$section" README.md; then
               echo "WARNING: README.md may be missing section: $section"
             fi
