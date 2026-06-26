@@ -69,7 +69,7 @@ jobs:
       # ── Pre-commit Validation ───────────────────────────────────────────────
       - name: Set up Python
         if: steps.bypass.outputs.skipped != 'true'
-        uses: actions/setup-python@ece7cb06eaefa5fff74198d8649806c4678c61a1  # v6.1.1
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.1.1
         with:
           python-version: "3.11"
 
@@ -105,7 +105,7 @@ jobs:
           steps.bypass.outputs.skipped != 'true' &&
           inputs.pr-size-limit > 0 &&
           github.event_name == 'pull_request'
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+        uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553  # v9.0.0
         with:
           script: |
             const { data: pr } = await github.rest.pulls.get({
@@ -142,7 +142,7 @@ jobs:
         if: |
           steps.bypass.outputs.skipped != 'true' &&
           inputs.commit-format == 'conventional'
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+        uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553  # v9.0.0
         with:
           script: |
             const conventionalRegex = /^(feat|fix|docs|style|refactor|test|chore|ci|perf|build|revert)(\(.+\))?: .{1,72}$/;

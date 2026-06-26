@@ -77,7 +77,7 @@ jobs:
       # ─── Vulnerability Scanning (Trivy FS) ─────────────────────────────
       - name: Run Trivy vulnerability scanner
         if: inputs.scan-type == 'all' || inputs.scan-type == 'vulnerabilities'
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8  # v0.36.0
         with:
           scan-type: "fs"
           scan-ref: ${{ inputs.scan-path }}
@@ -89,7 +89,7 @@ jobs:
 
       - name: Upload Trivy results to GitHub Security
         if: inputs.upload-sarif && (inputs.scan-type == 'all' || inputs.scan-type == 'vulnerabilities')
-        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e  # v4.2.5
+        uses: github/codeql-action/upload-sarif@411bbbe57033eedfc1a82d68c01345aa96c737d7  # v4.2.5
         with:
           sarif_file: "trivy-results.sarif"
           category: "trivy-filesystem"

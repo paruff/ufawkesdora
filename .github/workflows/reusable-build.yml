@@ -146,7 +146,7 @@ jobs:
       # ─── Coverage Quality Gate ─────────────────────────────────────────
       - name: Set up Python for coverage
         if: inputs.enable-coverage-gate
-        uses: actions/setup-python@ece7cb06eaefa5fff74198d8649806c4678c61a1  # v6.1.1
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.1.1
         with:
           python-version: ${{ inputs.python-version }}
 
