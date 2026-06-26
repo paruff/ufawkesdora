@@ -50,7 +50,7 @@ jobs:
 
       # ── Checkout ────────────────────────────────────────────────────────────
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -69,7 +69,7 @@ jobs:
       # ── Pre-commit Validation ───────────────────────────────────────────────
       - name: Set up Python
         if: steps.bypass.outputs.skipped != 'true'
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.1.1
         with:
           python-version: "3.11"
 
@@ -79,7 +79,7 @@ jobs:
 
       - name: Cache pre-commit environments
         if: steps.bypass.outputs.skipped != 'true'
-        uses: actions/cache@v6
+        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8  # v6.5.0
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
@@ -105,7 +105,7 @@ jobs:
           steps.bypass.outputs.skipped != 'true' &&
           inputs.pr-size-limit > 0 &&
           github.event_name == 'pull_request'
-        uses: actions/github-script@v9
+        uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553  # v9.0.0
         with:
           script: |
             const { data: pr } = await github.rest.pulls.get({
@@ -141,9 +141,8 @@ jobs:
       - name: Check commit messages
         if: |
           steps.bypass.outputs.skipped != 'true' &&
-          inputs.commit-format == 'conventional' &&
-          github.event_name == 'pull_request'
-        uses: actions/github-script@v9
+          inputs.commit-format == 'conventional'
+        uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553  # v9.0.0
         with:
           script: |
             const conventionalRegex = /^(feat|fix|docs|style|refactor|test|chore|ci|perf|build|revert)(\(.+\))?: .{1,72}$/;
@@ -230,7 +229,7 @@ jobs:
 
       - name: Run gitleaks
         if: steps.bypass.outputs.skipped != 'true'
-        uses: gitleaks/gitleaks-action@v3
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e  # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
