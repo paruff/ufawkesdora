@@ -136,6 +136,8 @@ jobs:
             }
 
       # ── Commit Format Check ─────────────────────────────────────────────────
+      # Only enforced on pull_request events: on push to main the commits are
+      # merge commits that follow GitHub's PR title format, not conventional.
       - name: Check commit messages
         if: |
           steps.bypass.outputs.skipped != 'true' &&
