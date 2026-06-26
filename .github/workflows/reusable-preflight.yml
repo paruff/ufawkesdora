@@ -141,7 +141,8 @@ jobs:
       - name: Check commit messages
         if: |
           steps.bypass.outputs.skipped != 'true' &&
-          inputs.commit-format == 'conventional'
+          inputs.commit-format == 'conventional' &&
+          github.event_name == 'pull_request'
         uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553  # v9.0.0
         with:
           script: |
