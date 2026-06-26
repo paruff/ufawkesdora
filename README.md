@@ -7,7 +7,9 @@
 
 ## What This Is
 
-uFawkesDORA is an open-source DORA metrics pipeline that collects deployment and incident events, computes the four DORA metrics (Deployment Frequency, Lead Time, Change Failure Rate, Time to Restore), and classifies teams into DORA archetypes (elite, high, medium, low). It is designed for platform engineering teams who want to measure and improve their delivery performance using the [DORA 2025 framework](https://dora.dev).
+uFawkesDORA is an open-source DORA metrics pipeline that collects delivery events from any CI/CD system, computes the five DORA 2025 metrics (Deployment Frequency, Lead Time for Changes, Failed Deployment Recovery Time, Change Failure Rate, Rework Rate), and classifies teams against the DORA seven-archetype model. It is designed for platform engineering teams who want to measure and improve their delivery performance using the [DORA 2025 framework](https://dora.dev).
+
+See the [full specification](docs/spec/specification.md) for detailed metric definitions, event schema contracts, computation rules, alerting specifications, and wellbeing survey design.
 
 ## What This Is Not
 
@@ -18,15 +20,38 @@ uFawkesDORA is an open-source DORA metrics pipeline that collects deployment and
 
 ## Status
 
-**v0.0 — scaffold only.** The schema, ingestion API, event schemas, metrics computation, and collector patterns exist. What is not yet built:
+**v0.0 — scaffold only.** The schema, ingestion API, event schemas, metrics computation, five DORA 2025 metrics, and collector patterns exist. What is built for v0.1.0:
 
-- Dynamic config reload (all config is file-based today)
-- Grafana dashboards for the four DORA metrics
-- Team CRUD API (teams are hardcoded in config)
-- Automated schema migration in CI (migrations exist but must be applied manually)
+- ✅ Five DORA metrics computed from Postgres event store (Deployment Frequency, Lead Time for Changes, FDRT, CFR, Rework Rate)
+- ✅ Ingestion API with JSON Schema validation (events: `deployment`, `incident`, `pr`, `rework`)
+- ✅ Async worker with `SKIP LOCKED` dequeuing
+- ✅ GitHub Actions collectors for deployment and PR events
+- ✅ Generic webhook receiver for Woodpecker/Portainer/other sources
+- ✅ Manual incident declaration script
+- ✅ Regression-based Prometheus alerting rules
+- ✅ README following uFawkes documentation standard
+
+**In scope for v0.1.0 (not yet built):**
+- Grafana DORA Overview dashboard (dual datasource: Prometheus + Postgres)
+- Leading indicators dashboard (PR cycle time, PR size MA, Rework Rate MA)
+- Weekly Slack digest (`notifications/digest/generate_digest.py`)
+- PR-level lead time annotations (GitHub Actions reusable workflow)
+
+**In scope for v0.2.0:**
+- Seven-archetype classifier with wellbeing survey
+- Archetype Profile dashboard and AI Impact dashboard
+- Value stream indicators (Lead Time by stage)
 - Production deployment guide
+- Automated schema migration in CI
 
-See the [uFawkes roadmap](https://github.com/paruff/fawkes/blob/main/ROADMAP.md) for what is coming next.
+**Explicitly out of scope (uFawkesDORA is not):**
+- A Kubernetes/cluster instrumentation tool — uFawkesObs handles infrastructure observability
+- An individual developer metrics system — DORA measures system outcomes, not people
+- A real-time streaming pipeline — all computation is batch
+- A multi-tenant platform — self-hosted for single teams
+- An SLA/SLO tracker — that is an uFawkesObs reliability concern
+
+See the [uFawkes roadmap](https://github.com/paruff/fawkes/blob/main/ROADMAP.md) for the full picture.
 
 ## Architecture
 
@@ -42,6 +67,8 @@ flowchart LR
         API[Ingestion API\nFastAPI + asyncpg]
         WKR[Worker\nAsync event processor]
         MET[Compute Engine\nDORA metrics + Pushgateway]
+        ARCH[Archetype Classifier\n7-archetype model]
+        DIGEST[Delivery\nDashboards + Digest + PR annotations]
 
         COLL1[GitHub Collectors\nReusable workflows]
         COLL2[Non-GitHub Collectors\nShell / curl / Woodpecker]
@@ -52,22 +79,34 @@ flowchart LR
         WKR -->|SKIP LOCKED dequeue| TSDB
         MET -->|TimescaleDB queries| TSDB
         MET -->|Pushgateway| PROM[(Prometheus\nin uFawkesObs)]
+        ARCH -->|read snapshots| TSDB
+        DIGEST -->|read snapshots| TSDB
+        DIGEST -->|Grafana| PROM
     end
 
     style TSDB fill:#2d5a27,color:#fff
     style API fill:#1a5276,color:#fff
     style WKR fill:#1a5276,color:#fff
     style MET fill:#1a5276,color:#fff
+    style ARCH fill:#1a5276,color:#fff
+    style DIGEST fill:#1a5276,color:#fff
     style COLL1 fill:#633974,color:#fff
     style COLL2 fill:#633974,color:#fff
 ```
 
 ### Data flow
 
-1. **Collectors** (GitHub reusable workflows, Woodpecker CI steps, shell scripts, curl) POST canonical events to the ingestion API.
+1. **Collectors** (GitHub reusable workflows, Woodpecker CI steps, shell scripts, curl) POST canonical events to the ingestion API. Four event types are supported: `deployment`, `incident`, `pr`, and `rework`.
 2. **Ingestion API** validates the event against its JSON Schema (`events/*.schema.json`), enqueues it with status `pending`.
 3. **Worker** dequeues events via `SELECT ... FOR UPDATE SKIP LOCKED`, validates payload structure, inserts into `raw_events`.
-4. **Compute Engine** (cron or triggered) queries `raw_events` for each team, computes the four DORA metrics + Rework Rate, classifies the team, and writes a snapshot to `dora_snapshots`. Optionally pushes metrics to a Prometheus Pushgateway for Grafana dashboards.
+4. **Compute Engine** (cron or triggered) queries `raw_events` for each team, computes the five DORA 2025 metrics (Deployment Frequency, Lead Time for Changes, FDRT, Change Failure Rate, Rework Rate), and writes a snapshot to `dora_snapshots`. Optionally pushes metrics to a Prometheus Pushgateway for Grafana dashboards.
+5. **Archetype Classifier** reads the latest snapshots and classifies the team against the DORA seven-archetype model (Harmonious high-achievers, Pragmatic performers, Stable and methodical, Constrained by process, Legacy bottleneck, High impact/low cadence, plus a seventh archetype pending primary-source confirmation). Classification confidence is capped when no wellbeing survey data is available.
+6. **Delivery mechanisms** surface results: Grafana dashboards (Prometheus + Postgres datasources), weekly Markdown digest, and PR-level lead time annotations.
+
+### Key metric definitions
+
+- **FDRT (Failed Deployment Recovery Time)**: Time from a failed deployment to the next successful deployment of the same service — **not** incident-resolution MTTR. FDRT was reclassified from Stability to Throughput in the 2025 DORA model. It is never called "MTTR" anywhere in the system.
+- **Rework Rate**: Percentage of deployments that are unplanned fixes for user-visible issues from a recent deployment. This is the primary signal for AI-assisted development quality — AI-generated code with higher churn pushes Rework Rate up before CFR spikes.
 
 ### Repo structure
 
@@ -83,7 +122,7 @@ flowchart LR
 │   ├── migrations/        #   Forward-only numbered migrations (001-003)
 │   └── timescaledb/       #   Hypertable conversion SQL
 ├── docs/                  # Planning & discovery artifacts
-│   ├── spec/              #   Feature specifications
+│   ├── spec/              #   Product specification (metrics, schemas, alerts)
 │   ├── design/            #   Technical designs
 │   ├── plan/              #   Task plans and decomposition
 │   └── discovery/         #   User research discovery briefs
@@ -186,11 +225,20 @@ Unit tests cover:
 
 ## DORA Capability
 
-uFawkesDORA implements **DORA AI Capability 2: DORA metrics pipeline** — automated collection and computation of the four DORA metrics (Deployment Frequency, Lead Time, Change Failure Rate, Time to Restore) plus Rework Rate (DORA 2025). It also contributes to **DORA AI Capability 7: Quality internal platforms** — the measurement half — by providing the metric substrate that platform teams use to validate whether their IDP improvements are actually moving the needle.
+uFawkesDORA implements **DORA AI Capability 2: DORA metrics pipeline** — automated collection and computation of the five DORA 2025 metrics (Deployment Frequency, Lead Time for Changes, Failed Deployment Recovery Time, Change Failure Rate, Rework Rate). It also contributes to **DORA AI Capability 7: Quality internal platforms** — the measurement half — by providing the metric substrate that platform teams use to validate whether their IDP improvements are actually moving the needle.
+
+**Key design choices, aligned with the [specification](docs/spec/specification.md):**
 
 - **Automated**: Collectors fire automatically from CI pipelines (GitHub Actions, Woodpecker, curl webhooks). No manual data entry.
 - **Canonical schemas**: All events validated against Draft-07 JSON Schemas with `additionalProperties: false` — prevents data quality drift.
-- **DORA 2025**: Implements the updated DORA 2025 framework including Rework Rate and FDRT (deployment-gap based Failure Deployment Recovery Time, not incident MTTR).
+- **DORA 2025**: Implements the 2025 framework including FDRT reclassified as a Throughput metric (not incident MTTR) and Rework Rate as the fifth metric.
+- **Seven-archetype classifier**: Teams are classified against the DORA 2025 seven-archetype model, not the deprecated Elite/High/Medium/Low tiers. Classification confidence is capped without wellbeing survey data.
+- **Delivery surface**: Grafana dashboards (dual datasource — Prometheus for time series, Postgres for snapshots), weekly Markdown digest, and PR-level lead time annotations.
+- **Regression-based alerts**: All DORA alerts are relative to a team's own 30-day baseline, not fixed industry thresholds.
+
+**Leading indicators (v0.1.0):** PR cycle time P90, PR size 14-day MA, and Rework Rate 14-day MA predict metric degradation before it appears in the five DORA metrics.
+
+**Value stream indicators (v0.2.0):** Lead Time segmented into coding, review, CI, deploy, and rework stages to identify where AI productivity gains are being absorbed.
 
 ## Contributing
 
