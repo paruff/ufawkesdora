@@ -76,3 +76,14 @@ repos:
       - id: detect-secrets
         name: Detect secrets
         args: ["--baseline", ".secrets.baseline"]
+
+  # ============================================================================
+  # Commit Message Validation
+  # ============================================================================
+  - repo: local
+    hooks:
+      - id: conventional-commit
+        name: Validate Conventional Commits format
+        entry: scripts/commit-msg.sh
+        language: script
+        stages: [commit-msg]
