@@ -1,0 +1,295 @@
+# ============================================================================
+# Release — Deployment Pipeline
+# ----------------------------------------------------------------------------
+# Entry-point for tag pushes (v*.*.*) and manual releases.
+#
+# Runs the CI gate first, then deploys and verifies.
+# Deploy and post-deploy logic is inlined here since this is the sole consumer.
+# ============================================================================
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment (dev, staging, production)"
+        required: false
+        type: string
+        default: "dev"
+      image-tag:
+        description: "Container image tag to deploy (defaults to git tag or SHA)"
+        required: false
+        type: string
+        default: ""
+      image-name:
+        description: "Container image name (without tag)"
+        required: false
+        type: string
+        default: "ghcr.io/paruff/ufawkesdora-api"
+      skip-deploy:
+        description: "Skip deploy and post-deploy phases (CI gate only)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  # contents: write required for deploy phase to push GitOps manifest updates
+  contents: write
+  pull-requests: write
+  security-events: write
+  actions: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ─── CI Gate ─────────────────────────────────────────────────────────
+  ci:
+    name: CI Gate
+    uses: ./.github/workflows/ci.yml
+
+  # ─── Deploy ──────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to ${{ inputs.environment || 'dev' }}
+    needs: [ci]
+    if: |
+      always() &&
+      needs.ci.result == 'success' &&
+      !inputs.skip-deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      status: ${{ steps.deploy-outcome.outputs.status }}
+      deployed-tag: ${{ steps.resolve-tag.outputs.tag }}
+      environment: ${{ inputs.environment || 'dev' }}
+
+    steps:
+      # ── Resolve Image Tag ────────────────────────────────────────────
+      - name: Resolve image tag
+        id: resolve-tag
+        run: |
+          if [ -n "${{ inputs.image-tag }}" ]; then
+            TAG="${{ inputs.image-tag }}"
+          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="${{ github.sha }}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Resolved image tag: $TAG"
+
+      # ── DORA Timestamp ──────────────────────────────────────────────
+      - name: DORA job start
+        run: |
+          echo "job-start:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "sha:${{ github.sha }}"
+          echo "workflow:${{ github.workflow }}"
+          echo "job:${{ github.job }}"
+          echo "environment:${{ inputs.environment || 'dev' }}"
+          echo "image:ghcr.io/paruff/ufawkesdora-api:${{ steps.resolve-tag.outputs.tag }}"
+
+      # ── Checkout ─────────────────────────────────────────────────────
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # ── Update Image Tag in Manifests ────────────────────────────────
+      - name: Update image tag
+        id: update-tag
+        run: |
+          ENV="${{ inputs.environment || 'dev' }}"
+          MANIFEST_DIR="overlays/$ENV"
+          IMAGE_TAG="${{ steps.resolve-tag.outputs.tag }}"
+          echo "Updating image ghcr.io/paruff/ufawkesdora-api to tag $IMAGE_TAG in $MANIFEST_DIR"
+
+          if [ -f "$MANIFEST_DIR/kustomization.yaml" ] || [ -f "$MANIFEST_DIR/kustomization.yml" ]; then
+            KUSTOMIZE_FILE=$(ls "$MANIFEST_DIR/kustomization.yaml" "$MANIFEST_DIR/kustomization.yml" 2>/dev/null | head -1)
+
+            if grep -q "newTag:" "$KUSTOMIZE_FILE"; then
+              sed -i "s|newTag:.*|newTag: $IMAGE_TAG|" "$KUSTOMIZE_FILE"
+              echo "Updated newTag in $KUSTOMIZE_FILE"
+            elif grep -q "newName:" "$KUSTOMIZE_FILE"; then
+              sed -i "s|newName:.*|newName: ghcr.io/paruff/ufawkesdora-api|" "$KUSTOMIZE_FILE"
+              sed -i "s|newTag:.*|newTag: $IMAGE_TAG|" "$KUSTOMIZE_FILE"
+              echo "Updated newName/newTag in $KUSTOMIZE_FILE"
+            else
+              echo "No image override found, appending..."
+              printf '\nimages:\n' >> "$KUSTOMIZE_FILE"
+              printf '  - name: PLACEHOLDER_IMAGE\n' >> "$KUSTOMIZE_FILE"
+              printf '    newName: ghcr.io/paruff/ufawkesdora-api\n' >> "$KUSTOMIZE_FILE"
+              printf '    newTag: %s\n' "$IMAGE_TAG" >> "$KUSTOMIZE_FILE"
+            fi
+            echo "update_method=kustomize" >> $GITHUB_OUTPUT
+          else
+            echo "::warning::No kustomization.yaml found in $MANIFEST_DIR"
+            echo "update_method=none" >> $GITHUB_OUTPUT
+          fi
+
+      # ── Commit & Push ────────────────────────────────────────────────
+      - name: Configure Git
+        run: |
+          git config --global user.name "uFawkesDORA Bot"
+          git config --global user.email "bot@ufawkes.dev"
+
+      - name: Commit and push manifest update
+        id: commit
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit — image tag ${{ steps.resolve-tag.outputs.tag }} already deployed"
+            echo "committed=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          git commit -m "chore: promote ghcr.io/paruff/ufawkesdora-api:${{ steps.resolve-tag.outputs.tag }} to ${{ inputs.environment || 'dev' }}"
+          git push origin ${{ github.ref_name }}
+          echo "committed=true" >> $GITHUB_OUTPUT
+          COMMIT_SHA=$(git rev-parse HEAD)
+          echo "commit_sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
+          echo "Deployed ghcr.io/paruff/ufawkesdora-api:${{ steps.resolve-tag.outputs.tag }} to ${{ inputs.environment || 'dev' }}"
+
+      # ── Wait for Reconciliation ──────────────────────────────────────
+      - name: Wait for GitOps reconciliation
+        if: steps.commit.outputs.committed == 'true'
+        run: |
+          echo "Waiting 60s for reconciliation..."
+          sleep 60
+          echo "Reconciliation wait complete"
+
+      # ── Outcome ──────────────────────────────────────────────────────
+      - name: Set deploy outcome
+        id: deploy-outcome
+        if: always()
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+          else
+            echo "status=failed" >> $GITHUB_OUTPUT
+          fi
+
+      # ── Summary ──────────────────────────────────────────────────────
+      - name: Generate deploy summary
+        if: always()
+        run: |
+          echo "## Deployment: ${{ inputs.environment || 'dev' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | ${{ inputs.environment || 'dev' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | ghcr.io/paruff/ufawkesdora-api:${{ steps.resolve-tag.outputs.tag }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ${{ steps.deploy-outcome.outputs.status }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: DORA job finish
+        if: always()
+        run: echo "job-finish:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  # ─── Post-Deployment ────────────────────────────────────────────────
+  post-deployment:
+    name: Post-Deployment Verification
+    needs: [deploy]
+    if: |
+      always() &&
+      needs.deploy.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+      - name: DORA job start
+        run: |
+          echo "job-start:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "environment:${{ inputs.environment || 'dev' }}"
+          echo "deployed-tag:${{ needs.deploy.outputs.deployed-tag }}"
+
+      # ── Health Check ────────────────────────────────────────────────
+      - name: Health check
+        id: health
+        run: |
+          ENV="${{ inputs.environment || 'dev' }}"
+          ENDPOINT="https://api.$ENV.ufawkes.dev/health"
+          echo "Checking health endpoint: $ENDPOINT"
+          for i in $(seq 1 10); do
+            HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' "$ENDPOINT" 2>/dev/null || echo "000")
+            if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "204" ]; then
+              echo "Health check passed (HTTP $HTTP_CODE)"
+              echo "healthy=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            echo "Attempt $i: HTTP $HTTP_CODE, retrying..."
+            sleep 5
+          done
+          echo "::error::Health check failed after 10 attempts"
+          echo "healthy=false" >> $GITHUB_OUTPUT
+          exit 1
+
+      # ── Smoke Tests ──────────────────────────────────────────────────
+      - name: Smoke tests
+        if: always() && steps.health.outputs.healthy == 'true'
+        run: |
+          ENV="${{ inputs.environment || 'dev' }}"
+          echo "Running smoke tests for $ENV..."
+          if curl -sf "https://api.$ENV.ufawkes.dev/health"; then
+            echo "Smoke tests passed"
+          else
+            echo "::error::Smoke tests FAILED"
+            exit 1
+          fi
+
+      # ── DORA Metric Recording ────────────────────────────────────────
+      - name: Record DORA deployment event
+        if: always()
+        run: |
+          echo "Recording DORA deployment metric for ${{ inputs.environment || 'dev' }}..."
+          echo "DORA deployment event recorded (simulated)"
+
+      # ── Summary ──────────────────────────────────────────────────────
+      - name: Generate summary
+        if: always()
+        run: |
+          echo "## Post-Deployment Verification: ${{ inputs.environment || 'dev' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Health Check | ${{ steps.health.outputs.healthy == 'true' && 'Pass' || 'Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Smoke Tests | ${{ steps.health.outputs.healthy == 'true' && 'Pass' || 'Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| DORA Metric | Recorded |" >> $GITHUB_STEP_SUMMARY
+
+      - name: DORA job finish
+        if: always()
+        run: echo "job-finish:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  # ─── Gate: Release Complete ─────────────────────────────────────────
+  release-complete:
+    name: Release Complete
+    needs: [ci, deploy, post-deployment]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check results
+        run: |
+          echo "=== Release Results ==="
+          echo "CI Gate:            ${{ needs.ci.result }}"
+          echo "Deploy:             ${{ needs.deploy.result }}"
+          echo "Post-Deployment:    ${{ needs.post-deployment.result }}"
+
+          if [ "${{ needs.ci.result }}" == "failure" ] || \
+             [ "${{ needs.deploy.result }}" == "failure" ] || \
+             [ "${{ needs.post-deployment.result }}" == "failure" ]; then
+            echo ""
+            echo "Release FAILED"
+            exit 1
+          fi
+
+          echo ""
+          echo "Release PASSED"

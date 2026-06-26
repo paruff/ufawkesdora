@@ -1,18 +1,38 @@
+# ============================================================================
+# Reusable Tests — All Test Tiers + Documentation Lint
+# ----------------------------------------------------------------------------
+# Consolidates the former ci-tests.yml (unit, integration, smoke, E2E) and
+# docs-lint.yml (required-files, markdown-lint, link-check) into a single
+# reusable workflow.
+#
+# Test tiers (via `test-tiers` input, comma-separated):
+#   unit          — Fast unit tests without Docker
+#   compose-smoke — Compose stack health verification
+#   integration   — Integration tests against Docker services
+#   e2e           — End-to-end tests against running API
+#   docs          — Documentation quality (required files, markdown lint, links)
+# ============================================================================
+
 name: Reusable Tests
 
 on:
   workflow_call:
     inputs:
       test-tiers:
-        description: "Comma-separated test tiers to run: unit, integration, compose-smoke, golden-path"
+        description: "Comma-separated test tiers: unit, compose-smoke, integration, e2e, docs"
         required: false
         type: string
-        default: "unit,compose-smoke,integration"
+        default: "unit,compose-smoke,integration,docs"
       python-version:
         description: "Python version for test runners"
         required: false
         type: string
-        default: "3.12"
+        default: "3.11"
+      run-unit:
+        description: "Run unit tests (set false when unit tests already ran in pre-commit)"
+        required: false
+        type: boolean
+        default: true
       unit-test-command:
         description: "Command to run unit tests"
         required: false
@@ -27,12 +47,12 @@ on:
         description: "Docker Compose profile to use"
         required: false
         type: string
-        default: "core"
+        default: ""
       compose-file:
         description: "Docker Compose file path"
         required: false
         type: string
-        default: "compose.yaml"
+        default: "docker-compose.test.yml"
       health-endpoints:
         description: "Comma-separated health endpoints to verify"
         required: false
@@ -48,18 +68,21 @@ on:
         required: false
         type: string
         default: ""
+    secrets:
+      DATABASE_URL:
+        description: "Database connection string for integration tests"
+        required: false
 
 permissions:
   contents: read
 
 jobs:
-  # ─── Unit Tests ────────────────────────────────────────────────────────────
+  # ─── Unit Tests (fast, no Docker) ──────────────────────────────────────
   unit-tests:
     name: Unit Tests
-    if: contains(inputs.test-tiers, 'unit')
+    if: contains(inputs.test-tiers, 'unit') && inputs.run-unit
     runs-on: ubuntu-latest
     timeout-minutes: 10
-
     steps:
       - name: DORA job start
         run: |
@@ -109,13 +132,12 @@ jobs:
         if: always()
         run: echo "job-finish:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-  # ─── Compose Smoke Test ────────────────────────────────────────────────────
+  # ─── Compose Smoke Test ────────────────────────────────────────────────
   compose-smoke:
     name: Compose Smoke
     if: contains(inputs.test-tiers, 'compose-smoke')
     runs-on: ubuntu-latest
     timeout-minutes: 10
-
     steps:
       - name: DORA job start
         run: |
@@ -133,7 +155,13 @@ jobs:
           chmod -R 777 data/
 
       - name: Build and start stack
-        run: docker compose -f ${{ inputs.compose-file }} --profile ${{ inputs.compose-profile }} up -d --build
+        run: |
+          PROFILE="${{ inputs.compose-profile }}"
+          if [ -n "$PROFILE" ]; then
+            docker compose -f ${{ inputs.compose-file }} --profile "$PROFILE" up -d --build
+          else
+            docker compose -f ${{ inputs.compose-file }} up -d --build
+          fi
 
       - name: Wait for services
         run: sleep 90
@@ -148,7 +176,7 @@ jobs:
 
           IFS=',' read -ra EP_ARRAY <<< "$ENDPOINTS"
           for ep in "${EP_ARRAY[@]}"; do
-            ep=$(echo "$ep" | xargs)  # trim whitespace
+            ep=$(echo "$ep" | xargs)
             echo "Checking: $ep"
             curl -f "$ep" || { echo "Health check failed: $ep"; exit 1; }
           done
@@ -162,20 +190,24 @@ jobs:
 
       - name: Shutdown
         if: always()
-        run: docker compose -f ${{ inputs.compose-file }} --profile ${{ inputs.compose-profile }} down -v
+        run: |
+          PROFILE="${{ inputs.compose-profile }}"
+          if [ -n "$PROFILE" ]; then
+            docker compose -f ${{ inputs.compose-file }} --profile "$PROFILE" down -v
+          else
+            docker compose -f ${{ inputs.compose-file }} down -v
+          fi
 
       - name: DORA job finish
         if: always()
         run: echo "job-finish:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-  # ─── Integration Tests ─────────────────────────────────────────────────────
+  # ─── Integration Tests (Docker stack) ──────────────────────────────────
   integration-tests:
     name: Integration Tests
     if: contains(inputs.test-tiers, 'integration')
-    needs: [compose-smoke]
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-
+    timeout-minutes: 15
     steps:
       - name: DORA job start
         run: |
@@ -184,71 +216,73 @@ jobs:
           echo "workflow:${{ github.workflow }}"
           echo "job:${{ github.job }}"
 
-      - name: Checkout code
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v7
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ inputs.python-version }}
 
-      - name: Install Python dependencies
+      - name: Install test deps
         run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements-test.txt ]; then
-            pip install -r requirements-test.txt
-          elif [ -f tests/integration/requirements.txt ]; then
-            pip install -r tests/integration/requirements.txt
-          elif [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          fi
+          pip install pytest pytest-cov pytest-asyncio testcontainers \
+            psycopg2-binary httpx jsonschema asyncpg
 
-      - name: Create data directories
+      - name: Start integration stack
         run: |
-          mkdir -p data/{prometheus,grafana,tempo,loki,alertmanager}
-          chmod -R 777 data/
+          docker compose -f docker-compose.integration.yml up -d --build
 
-      - name: Start observability stack
-        run: docker compose -f ${{ inputs.compose-file }} --profile ${{ inputs.compose-profile }} up -d --build
+      - name: Wait for stack health
+        run: |
+          echo "Waiting for TimescaleDB..."
+          until docker compose -f docker-compose.integration.yml exec -T timescaledb \
+            pg_isready -U postgres -d dora_metrics; do
+            sleep 2
+          done
+          echo "TimescaleDB ready"
+          echo "Waiting for API..."
+          for i in $(seq 1 15); do
+            if curl -s -o /dev/null -w '%{http_code}' http://localhost:8088/health \
+              2>/dev/null | grep -q 200; then
+              echo "API ready"
+              break
+            fi
+            sleep 2
+          done
 
-      - name: Wait for services
-        run: sleep 90
+      - name: Run integration tests (DB schema)
+        run: |
+          pytest tests/integration/test_schema.py -v --tb=short
 
-      - name: Run integration tests
-        run: ${{ inputs.integration-test-command }}
+      - name: Run integration tests (metrics)
+        run: |
+          pytest tests/integration/test_metrics_integration.py -v --tb=short
 
-      - name: Show logs on failure
+      - name: Dump logs on failure
         if: failure()
         run: |
-          docker compose -f ${{ inputs.compose-file }} ps
-          docker compose -f ${{ inputs.compose-file }} logs --tail=50
+          docker compose -f docker-compose.integration.yml logs > integration.log
+          echo "Container logs dumped to integration.log"
 
-      - name: Shutdown
-        if: always()
-        run: docker compose -f ${{ inputs.compose-file }} --profile ${{ inputs.compose-profile }} down -v
-
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v7
+        if: failure()
         with:
-          name: integration-test-results
-          path: |
-            tests/integration/reports/
-            pytest-report.xml
-          if-no-files-found: ignore
+          name: integration-logs
+          path: integration.log
+
+      - name: Teardown
+        if: always()
+        run: docker compose -f docker-compose.integration.yml down -v
 
       - name: DORA job finish
         if: always()
         run: echo "job-finish:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-  # ─── Golden Path App Test ──────────────────────────────────────────────────
-  golden-path:
-    name: Golden Path App
-    if: contains(inputs.test-tiers, 'golden-path')
-    needs: [compose-smoke]
+  # ─── E2E Tests ─────────────────────────────────────────────────────────
+  e2e-tests:
+    name: E2E Tests
+    if: contains(inputs.test-tiers, 'e2e')
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
+    timeout-minutes: 15
     steps:
       - name: DORA job start
         run: |
@@ -257,53 +291,227 @@ jobs:
           echo "workflow:${{ github.workflow }}"
           echo "job:${{ github.job }}"
 
-      - name: Checkout code
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v7
 
-      - name: Check for app services
-        id: check_apps
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install test deps
         run: |
-          if grep -q '"8080:8080"' ${{ inputs.compose-file }} 2>/dev/null; then
-            echo "has_apps=true" >> $GITHUB_OUTPUT
-          else
-            echo "has_apps=false" >> $GITHUB_OUTPUT
-          fi
+          pip install requests jsonschema asyncpg
 
-      - name: Build and start full stack
-        if: steps.check_apps.outputs.has_apps == 'true'
+      - name: Start E2E stack
         run: |
-          mkdir -p data/prometheus data/grafana
-          chmod -R 777 data/
-          docker compose -f ${{ inputs.compose-file }} --profile core --profile apps up -d --build
+          docker compose -f docker-compose.test.yml up -d --build
 
-      - name: Wait
-        if: steps.check_apps.outputs.has_apps == 'true'
-        run: sleep 30
-
-      - name: Hit endpoints
-        if: steps.check_apps.outputs.has_apps == 'true'
+      - name: Wait for E2E stack
         run: |
-          curl -f http://localhost:8080/
-          curl -f http://localhost:8080/slow
-          curl -f http://localhost:8080/error || true
+          for i in $(seq 1 20); do
+            if curl -s -o /dev/null -w '%{http_code}' http://localhost:8089/health \
+              2>/dev/null | grep -q 200; then
+              echo "E2E stack ready"
+              exit 0
+            fi
+            sleep 3
+          done
+          exit 1
 
-      - name: Shutdown
-        if: always() && steps.check_apps.outputs.has_apps == 'true'
-        run: docker compose -f ${{ inputs.compose-file }} down -v
+      - name: Run E2E test
+        run: |
+          python tests/integration/test_e2e_flow.py
 
-      - name: Skip
-        if: steps.check_apps.outputs.has_apps == 'false'
-        run: echo "No demo app services (port 8080) found. Skipping."
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          docker compose -f docker-compose.test.yml logs > e2e-test.log
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: e2e-logs
+          path: e2e-test.log
+
+      - name: Teardown
+        if: always()
+        run: docker compose -f docker-compose.test.yml down -v
 
       - name: DORA job finish
         if: always()
         run: echo "job-finish:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-  # ─── Test Summary ──────────────────────────────────────────────────────────
+  # ─── Smoke Tests (post-build verification) ─────────────────────────────
+  smoke-tests:
+    name: Smoke Tests
+    if: contains(inputs.test-tiers, 'integration')
+    needs: [integration-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: DORA job start
+        run: |
+          echo "job-start:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+      - uses: actions/checkout@v7
+
+      - name: Start full stack for smoke test
+        run: |
+          docker compose -f docker-compose.test.yml up -d --build
+
+      - name: Wait for API health
+        run: |
+          echo "Waiting for API health check..."
+          for i in $(seq 1 20); do
+            if curl -s -o /dev/null -w '%{http_code}' http://localhost:8089/health \
+              2>/dev/null | grep -q 200; then
+              echo "API responded with 200 OK"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "API health check failed after 60s"
+          docker compose -f docker-compose.test.yml logs api
+          exit 1
+
+      - name: Smoke test (health endpoint)
+        run: |
+          HEALTH=$(curl -s http://localhost:8089/health)
+          echo "Health response: $HEALTH"
+          echo "$HEALTH" | python3 -c \
+            "import sys, json; d=json.load(sys.stdin); assert d.get('status') == 'ok', f'Expected ok, got {d}'"
+          echo "Smoke test passed: /health returns OK"
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.test.yml logs > smoke-test.log
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: smoke-logs
+          path: smoke-test.log
+
+      - name: Teardown
+        if: always()
+        run: docker compose -f docker-compose.test.yml down -v
+
+      - name: DORA job finish
+        if: always()
+        run: echo "job-finish:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  # ─── Documentation Lint (from former docs-lint.yml) ───────────────────
+  required-files:
+    name: Required files
+    if: contains(inputs.test-tiers, 'docs')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check required files exist and are not placeholders
+        run: |
+          FAIL=0
+
+          # Required files
+          for f in README.md CHANGELOG.md CONTRIBUTING.md LICENSE; do
+            if [ ! -f "$f" ]; then
+              echo "MISSING: $f"
+              FAIL=1
+            fi
+          done
+
+          # AI_STANCE.md — required for uFawkesAI suite repos
+          if [ ! -f "AI_STANCE.md" ]; then
+            echo "MISSING: AI_STANCE.md"
+            FAIL=1
+          fi
+
+          # AGENTS.md — required if .agents/ exists
+          if [ -d ".agents" ] && [ ! -f "AGENTS.md" ]; then
+            echo "MISSING: AGENTS.md (required when .agents/ exists)"
+            FAIL=1
+          fi
+
+          # Architecture/design/spec doc — check multiple locations
+          if [ ! -f "ARCHITECTURE.md" ] && \
+             [ ! -f "docs/ARCHITECTURE.md" ] && \
+             [ ! -f "docs/design/design.md" ] && \
+             [ ! -f "docs/spec/specification.md" ]; then
+            echo "WARNING: No architecture/design/spec doc found"
+            echo "  Expected one of: ARCHITECTURE.md, docs/ARCHITECTURE.md,"
+            echo "  docs/design/design.md, docs/spec/specification.md"
+          fi
+
+          # tests/README.md
+          if [ ! -f "tests/README.md" ]; then
+            echo "WARNING: tests/README.md not found"
+          fi
+
+          # Placeholder check
+          if grep -rn "\[Add contribution guidelines here\]" --include="*.md" . | grep -v ".git"; then
+            echo "CONTRIBUTING.md is still a placeholder"
+            FAIL=1
+          fi
+
+          if grep -rn "CONFIRM_VARIANT" --include="*.md" . | grep -v ".git"; then
+            echo "Unresolved CONFIRM_VARIANT placeholder in markdown files"
+            FAIL=1
+          fi
+
+          # README required sections
+          for section in "## Status" "## Quick Start|Getting Started|## Install" "## Test"; do
+            if ! grep -qE "$section" README.md; then
+              echo "WARNING: README.md may be missing section: $section"
+            fi
+          done
+
+          exit $FAIL
+
+  markdown-lint:
+    name: Markdown lint
+    if: contains(inputs.test-tiers, 'docs')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: DavidAnson/markdownlint-cli2-action@v23
+        with:
+          globs: "**/*.md"
+          config: ".markdownlint.json"
+
+  link-check:
+    name: Check links
+    if: contains(inputs.test-tiers, 'docs')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          args: >
+            --no-progress
+            --exclude-all-private
+            --exclude 'localhost'
+            --exclude '0\.0\.0\.0'
+            --exclude 'example\.com'
+            '**/*.md'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ─── Test Summary ──────────────────────────────────────────────────────
   test-summary:
     name: Test Summary
     runs-on: ubuntu-latest
-    needs: [unit-tests, compose-smoke, integration-tests, golden-path]
+    timeout-minutes: 2
+    needs:
+      - unit-tests
+      - compose-smoke
+      - integration-tests
+      - e2e-tests
+      - smoke-tests
+      - required-files
+      - markdown-lint
+      - link-check
     if: always()
 
     steps:
@@ -320,17 +528,20 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Tier | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Unit Tests | ${{ needs.unit-tests.result == 'success' && '✅ Passed' || needs.unit-tests.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Compose Smoke | ${{ needs.compose-smoke.result == 'success' && '✅ Passed' || needs.compose-smoke.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Integration Tests | ${{ needs.integration-tests.result == 'success' && '✅ Passed' || needs.integration-tests.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Golden Path | ${{ needs.golden-path.result == 'success' && '✅ Passed' || needs.golden-path.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Unit Tests | ${{ needs.unit-tests.result == 'success' && 'Passed' || needs.unit-tests.result == 'skipped' && 'Skipped' || 'Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Compose Smoke | ${{ needs.compose-smoke.result == 'success' && 'Passed' || needs.compose-smoke.result == 'skipped' && 'Skipped' || 'Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Integration Tests | ${{ needs.integration-tests.result == 'success' && 'Passed' || needs.integration-tests.result == 'skipped' && 'Skipped' || 'Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| E2E Tests | ${{ needs.e2e-tests.result == 'success' && 'Passed' || needs.e2e-tests.result == 'skipped' && 'Skipped' || 'Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Documentation Lint | ${{ needs.required-files.result == 'success' && 'Passed' || needs.required-files.result == 'skipped' && 'Skipped' || 'Failed' }} |" >> $GITHUB_STEP_SUMMARY
 
           if [ "${{ needs.unit-tests.result }}" == "failure" ] || \
              [ "${{ needs.compose-smoke.result }}" == "failure" ] || \
              [ "${{ needs.integration-tests.result }}" == "failure" ] || \
-             [ "${{ needs.golden-path.result }}" == "failure" ]; then
+             [ "${{ needs.e2e-tests.result }}" == "failure" ] || \
+             [ "${{ needs.required-files.result }}" == "failure" ]; then
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "❌ **One or more test tiers failed**" >> $GITHUB_STEP_SUMMARY
+            echo "**One or more test tiers failed**" >> $GITHUB_STEP_SUMMARY
+            exit 1
           fi
 
       - name: DORA job finish

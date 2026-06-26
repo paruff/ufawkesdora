@@ -1,3 +1,21 @@
+# ============================================================================
+# CI — Continuous Integration Pipeline
+# ----------------------------------------------------------------------------
+# Entry-point for all pull requests and pushes to main.
+#
+# Replaces the former pipeline.yml (5-phase orchestrator) and the legacy
+# ci.yml (pre-commit-only).  All logic now lives in reusable workflows;
+# this file is purely an orchestrator.
+#
+# Phases that ran on every PR/push in the old pipeline:
+#   1. pre-commit   → reusable-preflight + reusable-lint (docs lint inlined)
+#   2. post-commit  → reusable-build
+#   3. pre-deploy   → reusable-tests + reusable-security-scanning +
+#                      reusable-dependency-review
+#
+# Deploy (Phase 4) and post-deploy (Phase 5) moved to release.yml.
+# ============================================================================
+
 name: CI
 
 on:
@@ -10,36 +28,124 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  security-events: write
+  actions: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  validate:
-    name: Validate
+  # ─── Phase 1: Pre-Commit ──────────────────────────────────────────────
+  preflight:
+    name: Pre-flight
+    uses: ./.github/workflows/reusable-preflight.yml
+    with:
+      pr-size-limit: 0
+
+  lint:
+    name: Lint
+    uses: ./.github/workflows/reusable-lint.yml
+
+  security:
+    name: Security Scan
+    uses: ./.github/workflows/reusable-security-scanning.yml
+    with:
+      scan-type: secrets
+      upload-sarif: false
+
+  # ─── Phase 2: Post-Commit ────────────────────────────────────────────
+  build:
+    name: Build & Validate
+    needs: [preflight, lint, security]
+    uses: ./.github/workflows/reusable-build.yml
+    with:
+      validate-prometheus: true
+      validate-otel: true
+      validate-tempo: true
+      validate-grafana: true
+      fail-on-latest: true
+      enable-coverage-gate: false
+
+  # ─── Phase 3: Pre-Deployment ─────────────────────────────────────────
+  tests:
+    name: Tests
+    needs: [build]
+    uses: ./.github/workflows/reusable-tests.yml
+    with:
+      test-tiers: "unit,compose-smoke,integration,e2e,docs"
+      run-unit: true
+
+  full-security:
+    name: Full Security Scan
+    needs: [build]
+    uses: ./.github/workflows/reusable-security-scanning.yml
+    with:
+      scan-type: all
+      severity-threshold: MEDIUM
+      fail-on-critical: true
+      upload-sarif: true
+
+  dependency-review:
+    name: Dependency Review
+    needs: [build]
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/reusable-dependency-review.yml
+    with:
+      fail-on-severity: moderate
+      comment-summary-in-pr: "true"
+
+  # ─── Gate: CI Complete ──────────────────────────────────────────────
+  ci-complete:
+    name: CI Complete
+    needs: [preflight, lint, security, build, tests, full-security, dependency-review]
+    if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      pull-requests: write
+    timeout-minutes: 2
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
+      - name: Check results
+        run: |
+          echo "=== CI Results ==="
+          echo "Pre-flight:          ${{ needs.preflight.result }}"
+          echo "Lint:                ${{ needs.lint.result }}"
+          echo "Security (secrets): ${{ needs.security.result }}"
+          echo "Build & Validate:    ${{ needs.build.result }}"
+          echo "Tests:               ${{ needs.tests.result }}"
+          echo "Security (full):     ${{ needs.full-security.result }}"
+          echo "Dependency Review:   ${{ needs.dependency-review.result }}"
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
+          if [ "${{ needs.preflight.result }}" == "failure" ] || \
+             [ "${{ needs.lint.result }}" == "failure" ] || \
+             [ "${{ needs.security.result }}" == "failure" ] || \
+             [ "${{ needs.build.result }}" == "failure" ] || \
+             [ "${{ needs.tests.result }}" == "failure" ] || \
+             [ "${{ needs.full-security.result }}" == "failure" ] || \
+             [ "${{ needs.dependency-review.result }}" == "failure" ]; then
+            echo ""
+            echo "CI FAILED"
+            exit 1
+          fi
 
-      - name: Install pre-commit
-        run: pip install pre-commit
+          echo ""
+          echo "CI PASSED"
 
-      - name: Cache pre-commit environments
-        uses: actions/cache@v6
-        with:
-          path: ~/.cache/pre-commit
-          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
-          restore-keys: |
-            pre-commit-${{ runner.os }}-
+      - name: DORA pipeline finish
+        if: always()
+        run: |
+          echo "pipeline-finish:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "pipeline-result:${{ contains(needs.*.result, 'failure') && 'failure' || 'success' }}"
 
-      - name: Run pre-commit hooks
-        run: pre-commit run --all-files
+      - name: Generate pipeline summary
+        if: always()
+        run: |
+          echo "# CI Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Phase | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Pre-flight | ${{ needs.preflight.result == 'success' && 'Pass' || needs.preflight.result == 'skipped' && 'Skipped' || 'Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Lint | ${{ needs.lint.result == 'success' && 'Pass' || 'Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Security (secrets) | ${{ needs.security.result == 'success' && 'Pass' || 'Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build & Validate | ${{ needs.build.result == 'success' && 'Pass' || 'Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tests | ${{ needs.tests.result == 'success' && 'Pass' || 'Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Security (full) | ${{ needs.full-security.result == 'success' && 'Pass' || 'Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dependency Review | ${{ needs.dependency-review.result == 'success' && 'Pass' || 'Fail' }} |" >> $GITHUB_STEP_SUMMARY
