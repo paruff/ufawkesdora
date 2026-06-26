@@ -48,9 +48,7 @@ on:
         description: "Go files detected"
         value: ${{ jobs.detect-changes.outputs.go }}
 
-permissions:
-  contents: read
-  pull-requests: read
+permissions: {}  # deny all at workflow level; grant per job below
 
 jobs:
   # ════════════════════════════════════════════════════════════════════════════
@@ -60,6 +58,8 @@ jobs:
     name: Detect Languages
     runs-on: ubuntu-latest
     timeout-minutes: 2
+    permissions:
+      contents: read
     outputs:
       python: ${{ steps.filter.outputs.python }}
       shell: ${{ steps.filter.outputs.shell }}
@@ -132,6 +132,8 @@ jobs:
   python-lint:
     name: Python Lint
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: ${{ inputs.timeout-minutes }}
     needs: detect-changes
     if: |
@@ -172,6 +174,8 @@ jobs:
   shell-lint:
     name: Shell Lint
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: ${{ inputs.timeout-minutes }}
     needs: detect-changes
     if: |
@@ -219,6 +223,8 @@ jobs:
   yaml-lint:
     name: YAML Lint
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: ${{ inputs.timeout-minutes }}
     needs: detect-changes
     if: |
@@ -256,6 +262,8 @@ jobs:
   typescript-lint:
     name: TypeScript Lint
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: ${{ inputs.timeout-minutes }}
     needs: detect-changes
     if: |
@@ -294,6 +302,8 @@ jobs:
   go-lint:
     name: Go Lint
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: ${{ inputs.timeout-minutes }}
     needs: detect-changes
     if: |
@@ -332,6 +342,8 @@ jobs:
   lint-summary:
     name: Lint Summary
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: ${{ inputs.timeout-minutes }}
     needs:
       - detect-changes
