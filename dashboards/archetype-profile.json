@@ -1,0 +1,432 @@
+{
+  "title": "Archetype Profile",
+  "uid": "archetype-profile",
+  "version": 1,
+  "schemaVersion": 39,
+  "tags": [
+    "dora",
+    "ufawkes",
+    "archetype"
+  ],
+  "description": "Team's current archetype, confidence, radar chart of five metrics vs archetype centroid, and recommendations based on the 2025 DORA seven-archetype model. Includes link to wellbeing survey.",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m",
+      "15m",
+      "30m",
+      "1h",
+      "2h",
+      "1d"
+    ],
+    "time_options": [
+      "5m",
+      "15m",
+      "1h",
+      "6h",
+      "12h",
+      "24h",
+      "2d",
+      "7d",
+      "30d",
+      "90d"
+    ]
+  },
+  "refresh": "5m",
+  "editable": true,
+  "graphTooltip": 0,
+  "templating": {
+    "list": [
+      {
+        "name": "team",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "PostgreSQL"
+        },
+        "query": "SELECT DISTINCT team_id FROM archetype_history ORDER BY team_id",
+        "refresh": 1,
+        "includeAll": true,
+        "allValue": ".*",
+        "sort": 1,
+        "label": "Team",
+        "multi": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "",
+      "type": "text",
+      "gridPos": {
+        "h": 3,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "transparent": true,
+      "options": {
+        "content": "<div style=\"display: flex; justify-content: space-between; align-items: center; padding: 8px 16px;\"><div><h1 style=\"margin: 0;\">Archetype Profile</h1><span style=\"color: #888; font-size: 0.9em;\">Current team archetype, confidence, and recommendations based on delivery metrics and wellbeing data</span></div><div style=\"text-align: right;\"><span style=\"color: #aaa; font-size: 0.85em;\">Data refreshed every 5m from PostgreSQL archetype_history table | <a href=\"https://github.com/paruff/uFawkesDORA/blob/main/compute/archetype_survey.md\" target=\"_blank\" style=\"color: #1f78b4; text-decoration: underline;\">Wellbeing Survey</a></span></div></div>",
+        "mode": "html"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Archetype",
+      "type": "stat",
+      "datasource": {
+        "type": "postgres",
+        "uid": "PostgreSQL"
+      },
+      "description": "The team's current archetype based on the latest classification.",
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 0,
+        "y": 3
+      },
+      "targets": [
+        {
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "SELECT archetype FROM archetype_history WHERE team_id = '$team' ORDER BY recorded_at DESC LIMIT 1;",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "stringify": true,
+          "textMode": "auto"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "textModeAutoTrim": "false"
+      }
+    },
+    {
+      "id": 3,
+      "title": "Confidence",
+      "type": "stat",
+      "datasource": {
+        "type": "postgres",
+        "uid": "PostgreSQL"
+      },
+      "description": "Confidence score (0-1) of the archetype classification. Confidence is capped at 0.65 when wellbeing survey data is not available.",
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 12,
+        "y": 3
+      },
+      "targets": [
+        {
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "SELECT confidence FROM archetype_history WHERE team_id = '$team' ORDER BY recorded_at DESC LIMIT 1;",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#d63902",
+                "value": 0.5
+              },
+              {
+                "color": "#d68b00",
+                "value": 0.75
+              },
+              {
+                "color": "#1b7f3a",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [],
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 4,
+      "title": "Confidence Limited Notice",
+      "type": "stat",
+      "datasource": {
+        "type": "postgres",
+        "uid": "PostgreSQL"
+      },
+      "description": "Shows warning when confidence is low due to lack of wellbeing survey data.",
+      "gridPos": {
+        "h": 2,
+        "w": 24,
+        "x": 0,
+        "y": 7
+      },
+      "targets": [
+        {
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "SELECT CASE WHEN confidence < 0.65 THEN 1 ELSE 0 END AS warning_flag FROM archetype_history WHERE team_id = '$team' ORDER BY recorded_at DESC LIMIT 1;",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": ""
+                },
+                "1": {
+                  "text": "⚠ Confidence limited — no wellbeing survey data"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "gray",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 5,
+      "title": "Archetype Radar Chart",
+      "type": "radar",
+      "datasource": {
+        "type": "postgres",
+        "uid": "PostgreSQL"
+      },
+      "description": "Radar chart showing the team's normalized metric values (solid line) compared to the archetype centroid (dashed line). Metrics are normalized 0-1 where 1 is best.",
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 9
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "WITH latest AS (\n  SELECT\n    archetype,\n    deployment_frequency_norm AS df,\n    lead_time_norm AS lt,\n    fdrt_norm AS f,\n    cfr_norm AS c,\n    rework_rate_norm AS r\n  FROM archetype_history\n  WHERE team_id = '$team'\n  ORDER BY recorded_at DESC\n  LIMIT 1\n),\ncentroids AS (\n  SELECT\n    archetype,\n    CASE archetype\n      WHEN 'Harmonious high-achievers' THEN 0.85\n      WHEN 'Pragmatic performers' THEN 0.75\n      WHEN 'Stable and methodical' THEN 0.65\n      WHEN 'Constrained by process' THEN 0.60\n      WHEN 'Legacy bottleneck' THEN 0.40\n      WHEN 'High impact, low cadence' THEN 0.50\n      ELSE 0.60\n    END AS df_centroid,\n    CASE archetype\n      WHEN 'Harmonious high-achievers' THEN 0.85\n      WHEN 'Pragmatic performers' THEN 0.75\n      WHEN 'Stable and methodical' THEN 0.85\n      WHEN 'Constrained by process' THEN 0.60\n      WHEN 'Legacy bottleneck' THEN 0.40\n      WHEN 'High impact, low cadence' THEN 0.50\n      ELSE 0.60\n    END AS lt_centroid,\n    CASE archetype\n      WHEN 'Harmonious high-achievers' THEN 0.85\n      WHEN 'Pragmatic performers' THEN 0.75\n      WHEN 'Stable and methodical' THEN 0.85\n      WHEN 'Constrained by process' THEN 0.60\n      WHEN 'Legacy bottleneck' THEN 0.40\n      WHEN 'High impact, low cadence' THEN 0.50\n      ELSE 0.60\n    END AS f_centroid,\n    CASE archetype\n      WHEN 'Harmonious high-achievers' THEN 0.75\n      WHEN 'Pragmatic performers' THEN 0.65\n      WHEN 'Stable and methodical' THEN 0.85\n      WHEN 'Constrained by process' THEN 0.60\n      WHEN 'Legacy bottleneck' THEN 0.40\n      WHEN 'High impact, low cadence' THEN 0.50\n      ELSE 0.60\n    END AS r_centroid\n  FROM latest\n)\nSELECT\n  \n  'Deployment Frequency' AS metric,\n  df AS value,\n  df_centroid AS centroid\nFROM latest, centroids\nUNION ALL\nSELECT\n  'Lead Time' AS metric,\n  lt AS value,\n  lt_centroid AS centroid\nFROM latest, centroids\nUNION ALL\nSELECT\n  'FDRT' AS metric,\n  f AS value,\n  f_centroid AS centroid\nFROM latest, centroids\nUNION ALL\nSELECT\n  'Change Failure Rate' AS metric,\n  c AS value,\n  c_centroid AS centroid\nFROM latest, centroids\nUNION ALL\nSELECT\n  'Rework Rate' AS metric,\n  r AS value,\n  r_centroid AS centroid\nFROM latest, centroids\nORDER BY metric;",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0.0
+              },
+              {
+                "color": "red",
+                "value": 1.0
+              }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "centroid"
+            },
+            "properties": [
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "custom.dashLength",
+                "value": 5
+              },
+              {
+                "id": "custom.spaceLength",
+                "value": 5
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Recommendation 1",
+      "type": "text",
+      "datasource": {
+        "type": "postgres",
+        "uid": "PostgreSQL"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 9
+      },
+      "transparent": true,
+      "options": {
+        "content": "",
+        "mode": "html"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "WITH latest AS (\n  SELECT archetype FROM archetype_history WHERE team_id = '$team' ORDER BY recorded_at DESC LIMIT 1\n)\nSELECT\n  CASE archetype\n    WHEN 'Harmonious high-achievers' THEN 'Continue fostering psychological safety and recognition to sustain high performance and wellbeing.'\n    WHEN 'Pragmatic performers' THEN 'Invest in team engagement initiatives to improve wellbeing while maintaining delivery speed.'\n    WHEN 'Stable and methodical' THEN 'Gradually increase deployment frequency through automation and batch size reduction.'\n    WHEN 'Constrained by process' THEN 'Identify and eliminate non-value-adding process steps to free up capacity for innovation.'\n    WHEN 'Legacy bottleneck' THEN 'Prioritize technical debt reduction and system modernization to improve stability and morale.'\n    WHEN 'High impact, low cadence' THEN 'Increase deployment frequency through CI/CD improvements and smaller batch sizes.'\n    ELSE 'Focus on improving both delivery metrics and team wellbeing through targeted interventions.'\n  END AS recommendation\nFROM latest;",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "text"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "title": "Recommendation 2",
+      "type": "text",
+      "datasource": {
+        "type": "postgres",
+        "uid": "PostgreSQL"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 24,
+        "y": 9
+      },
+      "transparent": true,
+      "options": {
+        "content": "",
+        "mode": "html"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "WITH latest AS (\n  SELECT archetype FROM archetype_history WHERE team_id = '$team' ORDER BY recorded_at DESC LIMIT 1\n)\nSELECT\n  CASE archetype\n    WHEN 'Harmonious high-achievers' THEN 'Regularly review workload distribution to prevent burnout during high-throughput periods.'\n    WHEN 'Pragmatic performers' THEN 'Implement regular retrospectives focused on team happiness and sustainable pace.'\n    WHEN 'Stable and methodical' THEN 'Experiment with feature flags and trunk-based development to enable faster feedback loops.'\n    WHEN 'Constrained by process' THEN 'Adopt value stream mapping to quantify delays and target process improvements.'\n    WHEN 'Legacy bottleneck' THEN 'Establish a dedicated tiger team for critical system modernization efforts.'\n    WHEN 'High impact, low cadence' THEN 'Implement automated testing and deployment pipelines to reduce release friction.'\n    ELSE 'Establish clear OKRs that balance delivery performance with team health metrics.'\n  END AS recommendation\nFROM latest;",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "text"
+          }
+        },
+        "overrides": []
+      }
+    }
+  ]
+}

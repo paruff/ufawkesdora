@@ -1,0 +1,448 @@
+{
+  "title": "AI Impact",
+  "uid": "ai-impact",
+  "version": 1,
+  "schemaVersion": 39,
+  "tags": [
+    "dora",
+    "ufawkes",
+    "ai-impact"
+  ],
+  "description": "Dashboard showing the impact of AI-assisted development on delivery metrics: PR size trend, code churn rate (placeholder), Rework Rate vs Deployment Frequency, and FDRT trend.",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m",
+      "15m",
+      "30m",
+      "1h",
+      "2h",
+      "1d"
+    ],
+    "time_options": [
+      "5m",
+      "15m",
+      "1h",
+      "6h",
+      "12h",
+      "24h",
+      "2d",
+      "7d",
+      "30d",
+      "90d"
+    ]
+  },
+  "refresh": "5m",
+  "editable": true,
+  "graphTooltip": 0,
+  "templating": {
+    "list": [
+      {
+        "name": "team",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "PostgreSQL"
+        },
+        "query": "SELECT DISTINCT source FROM raw_events ORDER BY source",
+        "refresh": 1,
+        "includeAll": true,
+        "allValue": "%",
+        "sort": 1,
+        "label": "Team",
+        "multi": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "",
+      "type": "text",
+      "gridPos": {
+        "h": 3,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "transparent": true,
+      "options": {
+        "content": "<div style=\"display: flex; justify-content: space-between; align-items: center; padding: 8px 16px;\"><div><h1 style=\"margin: 0;\">AI Impact</h1><span style=\"color: #888; font-size: 0.9em;\">Monitoring the effects of AI-assisted development on delivery quality and flow</span></div><div style=\"text-align: right;\"><span style=\"color: #aaa; font-size: 0.85em;\">Data from PostgreSQL raw_events table</span></div></div>",
+        "mode": "html"
+      }
+    },
+    {
+      "id": 2,
+      "title": "PR Size 14-day MA",
+      "type": "timeseries",
+      "datasource": {
+        "type": "postgres",
+        "uid": "PostgreSQL"
+      },
+      "description": "14-day moving average of lines added per merged PR. AI inflates PR size 50-150% — monitor Rework Rate for quality signal (DORA 2025).",
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 0,
+        "y": 3
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  date_trunc('day', recorded_at) AS time,\n  AVG((metadata->>'lines_added')::int)::numeric(10,1) AS overall_avg_lines,\n  AVG(CASE WHEN (metadata->>'ai_assisted')::boolean THEN (metadata->>'lines_added')::int ELSE NULL END)::numeric(10,1) AS ai_assisted_avg_lines\nFROM raw_events\nWHERE event_type = 'pr'\n  AND metadata->>'status' = 'merged'\n  AND source ILIKE '$team'\n  AND (metadata->>'lines_added')::int >= 0\n  AND recorded_at >= NOW() - INTERVAL '14 days'\nGROUP BY 1\nORDER BY 1;",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "auto",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "spanNulls": false,
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "orange",
+                "value": 200
+              },
+              {
+                "color": "red",
+                "value": 500
+              }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ai_assisted_avg_lines"
+            },
+            "properties": [
+              {
+                "id": "custom.drawStyle",
+                "value": "dashed"
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "custom.dashLength",
+                "value": 5
+              },
+              {
+                "id": "custom.spaceLength",
+                "value": 5
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Code Churn Rate",
+      "type": "stat",
+      "datasource": {
+        "type": "postgres",
+        "uid": "PostgreSQL"
+      },
+      "description": "Code churn rate: lines changed within 14 days of original commit divided by total lines in the repository. [PLACEHOLDER - requires commit data integration]",
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 12,
+        "y": 3
+      },
+      "targets": [
+        {
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "SELECT 'N/A' AS value",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "text"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "gray",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 4,
+      "title": "FDRT Trend",
+      "type": "timeseries",
+      "datasource": {
+        "type": "postgres",
+        "uid": "PostgreSQL"
+      },
+      "description": "Failed Deployment Recovery Time trend. FDRT is a Throughput metric per DORA 2025 — fast recovery enables faster re-deployment. This is NOT MTTR.",
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 0,
+        "y": 7
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  date_trunc('day', recorded_at) AS time,\n  AVG(fdrt_hours)::numeric(10,1) AS fdrt_trend\nFROM dora_snapshots\nWHERE team_id = '$team'\n  AND recorded_at >= NOW() - INTERVAL '30 days'\nGROUP BY 1\nORDER BY 1;",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "decimals": 1,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 1.0
+              },
+              {
+                "color": "orange",
+                "value": 24.0
+              },
+              {
+                "color": "red",
+                "value": 168.0
+              }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Rework Rate vs Deployment Frequency",
+      "type": "timeseries",
+      "datasource": {
+        "type": "postgres",
+        "uid": "PostgreSQL"
+      },
+      "description": "Dual-axis chart showing Rework Rate (left) and Deployment Frequency (right). The 'faster but messier' quadrant is high DF with high Rework Rate.",
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 12,
+        "y": 7
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  time,\n  value AS rework_rate_pct\nFROM (\n  SELECT\n    date_trunc('day', recorded_at) AS time,\n    AVG(rework_rate_pct * 100) AS value\n  FROM dora_snapshots\n  WHERE team_id = '$team'\n    AND recorded_at >= NOW() - INTERVAL '30 days'\n  GROUP BY 1\n) sub\nORDER BY 1;",
+          "refId": "A"
+        },
+        {
+          "format": "time_series",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  date_trunc('day', recorded_at) AS time,\n  AVG(deployment_frequency_per_week) AS value\nFROM dora_snapshots\nWHERE team_id = '$team'\n  AND recorded_at >= NOW() - INTERVAL '30 days'\nGROUP BY 1\nORDER BY 1;",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "fillOpacity": 10,
+          "lineWidth": 2,
+          "pointSize": 3
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "rework_rate_pct"
+            },
+            "properties": [
+              {
+                "id": "custom.unit",
+                "value": "percent"
+              },
+              {
+                "id": "custom.decimals",
+                "value": 2
+              },
+              {
+                "id": "custom.min",
+                "value": 0
+              },
+              {
+                "id": "custom.max",
+                "value": 50
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "Rework Rate (%)"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "left"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "deployment_frequency_per_week"
+            },
+            "properties": [
+              {
+                "id": "custom.unit",
+                "value": "none"
+              },
+              {
+                "id": "custom.decimals",
+                "value": 2
+              },
+              {
+                "id": "custom.min",
+                "value": 0
+              },
+              {
+                "id": "custom.scale",
+                "value": {
+                  "type": "linear"
+                }
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "Deployments/Week"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "yaxes": [
+          {
+            "format": "short",
+            "label": null,
+            "logBase": 1,
+            "max": null,
+            "min": null,
+            "show": true
+          },
+          {
+            "format": "short",
+            "label": null,
+            "logBase": 1,
+            "max": null,
+            "min": null,
+            "show": true
+          }
+        ]
+      }
+    }
+  ]
+}
