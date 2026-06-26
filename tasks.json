@@ -1,119 +1,353 @@
 {
-  "meta": {
-    "title": "5-Stage GitOps-Aligned Engineering Lifecycle Pipeline",
-    "issue": "Issue 11",
-    "estimate": "2 sessions (4-6hrs)",
-    "dora_capability": "AI Capability 7 (Quality internal platforms)"
-  },
   "tasks": [
     {
-      "id": "TASK-001",
-      "title": "Create docker-compose.integration.yml",
+      "id": "ISSUE-001",
+      "title": "feat(database): implement resource plane Postgres schema with TimescaleDB",
       "agent": "build",
-      "skills": ["build", "local-environment-simulation"],
-      "estimated_lines": 35,
+      "skills": ["build", "dependency-installation", "toolchain-validation"],
+      "estimated_lines": 300,
       "dependencies": [],
       "acceptance_criteria": [
-        "docker-compose.integration.yml exists in the root folder",
-        "Contains timescale/timescaledb:latest-pg16 and ingestion-api service definitions",
-        "Uses distinct networks and runs isolated from host port 5432"
+        "database/init/00-create-databases.sh creates dora_metrics, infisical, defectdojo databases with least-privilege roles via psql",
+        "Script is idempotent (safe to re-run)",
+        "database/init/01-dora-schema.sql creates all tables: event_queue, raw_events, dora_snapshots, archetype_history, wellbeing_surveys, vsi_stage_breakdown",
+        "database/init/02-dora-roles.sql creates dora_app role with least-privilege grants",
+        "database/timescaledb/hypertables.sql converts time-series tables to TimescaleDB hypertables",
+        "database/migrations/001-initial-schema.sql matches init scripts (first run = migration 001)",
+        "tests/unit/test_schema.py verifies tables exist, hypertable creation, role permissions (not superuser)",
+        "docker-compose.dev.yml includes local TimescaleDB container for solo development",
+        "All tests pass in CI"
       ],
-      "description": "Create an isolated docker compose environment for integration and schema testing"
+      "description": "Define the PostgreSQL + TimescaleDB schema for all uFawkesDORA data: event queue, raw events, DORA snapshots, archetype history, wellbeing surveys, and VSM stage breakdown. This is the foundational data model — everything else reads from or writes to these tables."
     },
     {
-      "id": "TASK-002",
-      "title": "Implement curl-based smoke test loop",
+      "id": "ISSUE-002",
+      "title": "feat(events): define canonical event schemas for all five DORA metrics",
+      "agent": "spec",
+      "skills": ["spec", "requirements-extraction"],
+      "estimated_lines": 150,
+      "dependencies": [],
+      "acceptance_criteria": [
+        "events/deployment-event.schema.json defines required fields: schema_version, event_type (\"deployment\"), repo, service, environment, commit_sha, deployed_at (ISO8601), status (\"success\" | \"failed\" | \"rollback\"), pipeline_url; optional: deploy_duration_seconds, ai_assisted (bool)",
+        "events/incident-event.schema.json defines required: schema_version, event_type (\"incident\"), incident_id, repo, service, status (\"opened\" | \"resolved\"), occurred_at; optional: linked_deployment_sha, severity",
+        "events/pr-event.schema.json defines required: schema_version, event_type (\"pr\"), repo, pr_number, commit_sha, status (\"opened\" | \"merged\" | \"closed\"), occurred_at, first_commit_at; optional: lines_added, lines_deleted, ai_assisted (bool)",
+        "events/rework-event.schema.json defines required: schema_version, event_type (\"rework\"), repo, deployment_sha, rework_type (\"hotfix\" | \"rollback\" | \"patch\"), triggered_at, user_visible (bool)",
+        "All schemas include version field starting at \"1.0\" with documented versioning policy in events/README.md",
+        "tests/unit/test_event_schemas.py validates each schema using jsonschema; tests both valid and invalid payloads",
+        "events/README.md provides field reference, versioning policy, and guidance on distinguishing rework vs normal deployment"
+      ],
+      "description": "Define the JSON schemas that all event sources must conform to. These schemas are the API contract between any CI/CD system and uFawkesDORA. Stability of these schemas is critical — a schema change breaks all connected collectors."
+    },
+    {
+      "id": "ISSUE-003",
+      "title": "feat(ingestion): stateless ingestion API with Postgres event queue",
       "agent": "build",
-      "skills": ["build", "deployment-smoke-tests"],
-      "estimated_lines": 25,
-      "dependencies": ["TASK-001"],
+      "skills": ["build", "code-generation"],
+      "estimated_lines": 400,
+      "dependencies": ["ISSUE-001", "ISSUE-002"],
       "acceptance_criteria": [
-        "A script or command successfully performs a health check loop",
-        "Retries up to 10 times with delay on connection-refused",
-        "Fails fast with exit code 1 if health check does not return HTTP 200/OK"
+        "ingestion/api/main.py exposes FastAPI app with POST /event (validates schema, enqueues, returns {\"queued\": true, \"id\": N}), GET /health (returns {\"status\": \"ok\", \"queue_depth\": N}), and POST /event/batch",
+        "ingestion/api/validator.py validates event_type field first, then routes to correct schema; returns structured 422 with field-level errors",
+        "ingestion/api/queue.py implements enqueue with INSERT INTO event_queue (event_type, payload) VALUES ($1, $2) RETURNING id; connection pool via asyncpg",
+        "ingestion/processor/worker.py implements dequeue loop: SELECT id, payload FROM event_queue WHERE status='pending' ORDER BY received_at LIMIT 1 FOR UPDATE SKIP LOCKED; writes to raw_events, pushes OTel counter, pushes Loki log, updates status='done'; on failure increments attempts, updates status='failed' if attempts >= 3",
+        "ingestion/Dockerfile uses multi-stage build, non-root user, includes health check",
+        "tests/unit/test_ingestion_api.py covers valid event accepted (201), invalid schema rejected (422 with field errors), queue depth in health check, duplicate events handled",
+        "tests/unit/test_worker.py covers dequeue success path, dequeue failure path (attempts increment), SKIP LOCKED (two workers don't claim same row)",
+        "Evidence: curl -X POST http://localhost:8088/event -d @fixtures/deployment-success.json → {\"queued\": true, \"id\": 1} → row appears in event_queue with status 'done' → row appears in raw_events → OTel span visible in uFawkesObs Tempo"
       ],
-      "description": "Create the automated smoke test script to verify API/database readiness"
+      "description": "Implement the stateless FastAPI ingestion API that accepts events on POST /event, validates the canonical schema, and enqueues to the Postgres event_queue table using the SKIP LOCKED pattern. This is the only component that needs to be reachable from external event sources."
     },
     {
-      "id": "TASK-003",
-      "title": "Implement E2E flow test",
-      "agent": "test",
-      "skills": ["test", "e2e-deployment-validation"],
-      "estimated_lines": 60,
-      "dependencies": ["TASK-001"],
-      "acceptance_criteria": [
-        "tests/integration/test_e2e_flow.py exists",
-        "Posts deployment and incident events to live API, waits for worker dequeue, runs compute/metrics.py, and asserts snapshot outputs match expected 2025 DORA tier schemas"
-      ],
-      "description": "Develop the end-to-end integration and computation validation test"
-    },
-    {
-      "id": "TASK-004",
-      "title": "Update GHA ci-tests.yml workflow with isolated jobs",
+      "id": "ISSUE-004",
+      "title": "feat(compute): five DORA metrics + Rework Rate from PostgreSQL",
       "agent": "build",
-      "skills": ["build", "pipeline-generation"],
-      "estimated_lines": 80,
-      "dependencies": ["TASK-002", "TASK-003"],
+      "skills": ["build", "code-generation"],
+      "estimated_lines": 350,
+      "dependencies": ["ISSUE-001", "ISSUE-002"],
       "acceptance_criteria": [
-        ".github/workflows/ci-tests.yml is updated with sequential integration, smoke, and e2e jobs",
-        "Dumps container logs to integration.log on failure and uploads them as GHA artifacts",
-        "Cleans up all Docker networks, volumes, and containers on complete"
+        "compute/metrics.py CLI: python compute/metrics.py --window 30 --repo paruff/uFawkesObs",
+        "Writes result to dora_snapshots table",
+        "Pushes Prometheus metrics via pushgateway: dora_deployment_frequency_per_week, dora_lead_time_p50_hours, dora_lead_time_p95_hours, dora_fdrt_p50_hours, dora_cfr_pct, dora_rework_rate_pct",
+        "proxy_metrics: true flag set when first_commit_at unavailable (falls back to PR merge time as lead time proxy); flag propagated to dora_snapshots",
+        "FDRT computed as deployment-gap, NOT incident-resolution gap (documented in inline comments with DORA 2025 citation)",
+        "DORA tier thresholds from 2025 research applied per metric; each metric in output includes dora_tier field",
+        "tests/unit/test_metrics.py covers all five metrics with fixture data; includes FDRT edge cases (no recovery deployment in window → null, not error)",
+        "GitHub Actions cron job: .github/workflows/compute-metrics.yml runs daily"
       ],
-      "description": "Configure the GitHub Actions testing runner to execute the multi-tier test pipelines"
+      "description": "Implement compute/metrics.py — the reference computation of all five DORA delivery metrics from the Postgres raw_events table, using TimescaleDB functions for time-series aggregation. Output to dora_snapshots table AND pushgateway (for Grafana time-series panels and alerting)."
     },
     {
-      "id": "TASK-005",
-      "title": "Validate GHA ci-pipeline.yml Orchestration",
-      "agent": "review",
-      "skills": ["review", "pipeline-policy"],
-      "estimated_lines": 10,
-      "dependencies": ["TASK-004"],
-      "acceptance_criteria": [
-        "ci-pipeline.yml successfully calls updated ci-tests.yml",
-        "All stages (Stage 0 through Stage 4) resolve cleanly in the correct order"
-      ],
-      "description": "Ensure the overall orchestrator correctly executes and gates on the new test runner jobs"
-    },
-    {
-      "id": "TASK-006",
-      "title": "Pre-commit compliance validation",
+      "id": "ISSUE-005",
+      "title": "feat(collectors): GitHub Actions reusable workflows for deployment and PR events",
       "agent": "build",
-      "skills": ["build", "code-quality"],
-      "estimated_lines": 5,
-      "dependencies": ["TASK-004", "TASK-005"],
+      "skills": ["build", "template-application"],
+      "estimated_lines": 100,
+      "dependencies": ["ISSUE-002"],
       "acceptance_criteria": [
-        "All created and modified files pass 13/13 pre-commit checks locally and in CI"
+        "collectors/github/dora-deployment-event.yml is reusable workflow (workflow_call) with inputs: status, environment, pipeline_url, ai_assisted (optional, default false); emits deployment-event to ${vars.DORA_INGESTION_URL}/event",
+        "collectors/github/dora-pr-event.yml is reusable workflow; emits pr-event on PR merge including first_commit_at (oldest commit SHA timestamp in the PR, fetched via GitHub API)",
+        "collectors/github/README.md explains how to wire both workflows in 10 minutes: \"add these 3 lines to your release workflow\"",
+        "collectors/github/example-consumer.yml shows complete example workflow with both collector calls in context",
+        "tests/unit/test_github_collector.py validates schema compliance for sample GitHub webhook payloads",
+        "Evidence: wire to uFawkesObs repo, trigger a test release → deployment event appears in raw_events table"
       ],
-      "description": "Verify code quality, formatting, and secret scanning on all newly introduced code"
+      "description": "Create reusable GitHub Actions workflows that any repo in the fawkes suite can call to emit deployment events and PR events to the uFawkesDORA ingestion API. This is the primary event source for GitHub-native teams."
+    },
+    {
+      "id": "ISSUE-006",
+      "title": "feat(collectors): generic webhook receiver + Woodpecker snippet + manual incident",
+      "agent": "build",
+      "skills": ["build", "template-application"],
+      "estimated_lines": 100,
+      "dependencies": ["ISSUE-002"],
+      "acceptance_criteria": [
+        "collectors/woodpecker/pipeline-snippet.yml is Woodpecker pipeline step that POSTs a deployment-event on pipeline success/failure; uses from_secret for DORA_INGESTION_URL and DORA_API_KEY (if auth enabled)",
+        "collectors/generic/curl-examples.sh provides curl commands for each event type (deployment success, deployment failed, incident opened, incident resolved, rework); well-commented, copy-paste ready",
+        "collectors/manual-incident/declare-incident.sh prompts for incident_id and service, then POSTs the incident-event; companion resolve-incident.sh for resolution",
+        "collectors/generic/README.md documents how to wire Portainer webhook (Portainer supports outgoing webhooks on stack redeploy)",
+        "Evidence: run declare-incident.sh → incident event appears in raw_events"
+      ],
+      "description": "Define three collector patterns for non-GitHub sources: a Woodpecker CI pipeline snippet, a generic curl-based webhook pattern for any CI/CD system, and a manual incident declaration template for teams without PagerDuty/Grafana OnCall."
+    },
+    {
+      "id": "ISSUE-007",
+      "title": "docs: README following uFawkes documentation standard",
+      "agent": "documentation",
+      "skills": ["documentation"],
+      "estimated_lines": 50,
+      "dependencies": [],
+      "acceptance_criteria": [
+        "All 9 required sections present: What This Is, What This Is Not, Status, Architecture, Quick Start, Testing, DORA Capability, Contributing, Suite Context",
+        "Architecture section explains the plane model: uFawkesDORA is a stateless compute plane that attaches to a resource plane Postgres instance",
+        "Includes architecture diagram (ASCII or Mermaid) showing the two-plane model",
+        "\"Status\" section honest about current state: \"v0.0 — scaffold only. See roadmap for what's coming.\"",
+        "Suite Context section includes links to all 8 repos in the fawkes platform suite",
+        "docs-lint CI check passes"
+      ],
+      "description": "Write a README following the minimum uFawkes documentation standard. The architecture section must explain the two-plane model where uFawkesDORA is a stateless compute plane attached to a resource plane Postgres instance."
+    },
+    {
+      "id": "ISSUE-008",
+      "title": "feat(dashboards): DORA Overview — five metrics with 2025 tier model",
+      "agent": "design",
+      "skills": ["design", "template-application"],
+      "estimated_lines": 200,
+      "dependencies": ["ISSUE-003", "ISSUE-004", "ISSUE-005"],
+      "acceptance_criteria": [
+        "dashboards/dora-overview.json is valid Grafana provisioning JSON",
+        "Five metric panels; each shows: stat (current value + tier badge), time-series (30/90 day trend), threshold lines (2025 DORA research values)",
+        "FDRT panel uses Throughput framing (not \"recovery time from incident\") with inline annotation explaining the 2025 reclassification",
+        "Rework Rate panel includes tooltip: \"Only counts user-visible unplanned deployments\"",
+        "Dashboard variables: team, service, environment, window (7d/30d/90d)",
+        "Banner when proxy_metrics=true: \"⚠ Proxy metrics active — wire deployment events for accurate data. See collectors/README.md\"",
+        "Documented copy step: dashboards/dora-overview.json → uFawkesObs grafana/provisioning/dashboards/",
+        "Evidence: docker compose up with demo fixture data → all five panels show non-empty data; no Grafana errors in browser console"
+      ],
+      "description": "Create the primary Grafana dashboard showing the five DORA metrics with current values, 30-day trends, DORA 2025 tier overlays, and team/service/window filters. Uses both Prometheus (time-series) and Postgres (snapshots) datasources."
+    },
+    {
+      "id": "ISSUE-009",
+      "title": "feat(dashboards): Leading Indicators — early warning before metrics degrade",
+      "agent": "design",
+      "skills": ["design", "template-application"],
+      "estimated_lines": 150,
+      "dependencies": ["ISSUE-003", "ISSUE-004", "ISSUE-005"],
+      "acceptance_criteria": [
+        "dashboards/leading-indicators.json is valid Grafana provisioning JSON",
+        "All five leading indicator panels with annotation text explaining what degradation means and which lagging DORA metric it predicts",
+        "PR size trend panel includes note: \"AI-assisted PRs average 50-150% larger than baseline — monitor for Rework Rate correlation (DORA 2025)\"",
+        "Branch age panel notes limitation if GitHub API polling not available; suggests alternative: use pr-event opened_at - first_commit_at as proxy",
+        "Annotations map each leading indicator to its predicted lagging DORA metric",
+        "Dashboard uses PostgreSQL datasource only (no Prometheus for leading indicators)"
+      ],
+      "description": "Create a PostgreSQL-only Grafana dashboard for leading indicators that predict DORA metric degradation before it appears in the five metrics. Includes PR cycle time, PR size trend, CI duration trend, rework rate trend, and branch age as predictors of Lead Time, Deployment Frequency, CFR, and Rework Rate changes."
+    },
+    {
+      "id": "ISSUE-010",
+      "title": "feat(alerts): regression-based Alertmanager rules (not threshold-based)",
+      "agent": "build",
+      "skills": ["build", "code-generation"],
+      "estimated_lines": 100,
+      "dependencies": ["ISSUE-004"],
+      "acceptance_criteria": [
+        "alerts/dora-regression.yaml contains all five regression alerts: DoraDeploymentFrequencyDrop, DoraLeadTimeIncrease, DoraFDRTSpike, DoraCFRSpike, DoraReworkRateClimb",
+        "alerts/leading-indicator.yaml contains PR cycle time + PR size trend alerts",
+        "Each alert includes summary, description (with current value and 30-day baseline for context), and runbook_url linking to docs/runbooks/",
+        "tests/unit/test_alert_rules.py uses promtool test rules with synthetic data: each alert fires on degraded data, does NOT fire on healthy data",
+        "Alerts wired to Alertmanager in uFawkesObs via docker-compose.yml network connection",
+        "Alert category labels: dora_throughput for metrics 1-3, dora_stability for metrics 4-5"
+      ],
+      "description": "Implement Prometheus alerting rules that fire when a DORA metric degrades relative to its 30-day baseline (regression-based) rather than when it crosses a fixed threshold. Includes alerts for the five DORA metrics plus leading indicators."
+    },
+    {
+      "id": "ISSUE-011",
+      "title": "feat(compute): seven archetype classifier with wellbeing integration",
+      "agent": "build",
+      "skills": ["build", "code-generation"],
+      "estimated_lines": 250,
+      "dependencies": ["ISSUE-004"],
+      "acceptance_criteria": [
+        "compute/archetype.py inputs: repo name + optional quarter string (pulls from dora_snapshots and wellbeing_surveys automatically)",
+        "Returns: {\"archetype\": \"Pragmatic performers\", \"confidence\": 0.78, \"wellbeing_data\": false, \"primary_bottleneck\": \"review_cycle_time\", \"recommendations\": [\"...\", \"...\"]}",
+        "When wellbeing_surveys has no data for the period: returns metrics-only classification with confidence capped at 0.65 and wellbeing_data: false",
+        "Classification logic documented inline — not a black box; cites DORA 2025 archetype definitions for each decision boundary",
+        "Writes result to archetype_history table",
+        "compute/archetype_survey.md provides four-question quarterly wellbeing survey with curl command to POST results to ingestion API",
+        "tests/unit/test_archetype.py covers all seven archetypes with representative fixture data; tests confidence degradation without wellbeing data",
+        "Scheduled via .github/workflows/compute-archetype.yml (monthly, after compute-metrics.yml runs)"
+      ],
+      "description": "Implement compute/archetype.py to classify teams into one of the seven 2025 DORA archetypes using delivery metrics from dora_snapshots and optional wellbeing scores from wellbeing_surveys. Store classification in archetype_history table."
+    },
+    {
+      "id": "ISSUE-012",
+      "title": "feat(dashboards): Archetype Profile + AI Impact dashboards",
+      "agent": "design",
+      "skills": ["design", "template-application"],
+      "estimated_lines": 300,
+      "dependencies": ["ISSUE-004", "ISSUE-011"],
+      "acceptance_criteria": [
+        "dashboards/archetype-profile.json is valid Grafana provisioning JSON",
+        "Archetype name stat panel (prominent)",
+        "Radar chart: five metrics normalized 0-1, overlaid with archetype centroid",
+        "Confidence stat panel with colour: green (≥0.75), yellow (0.5-0.75), red (<0.5)",
+        "\"Confidence limited — no wellbeing survey data\" text panel when confidence < 0.65",
+        "Two recommendation text panels keyed to archetype (static text; no LLM calls)",
+        "Link to compute/archetype_survey.md",
+        "dashboards/ai-impact.json is valid Grafana provisioning JSON",
+        "PR size 14-day MA panel with DORA 2025 reference annotation: \"AI inflates PR size 50-150% — monitor Rework Rate for quality signal\"",
+        "Rework Rate vs Deployment Frequency time series (dual-axis): \"faster but messier\" quadrant",
+        "Code churn rate panel (lines changed within 14 days of original commit / total lines)",
+        "FDRT trend panel",
+        "ai_assisted annotation line when available"
+      ],
+      "description": "Create two Postgres-dependent Grafana dashboards: Archetype Profile (shows team's current archetype, confidence, radar chart vs archetype centroid, recommendations) and AI Impact (shows PR size trend vs deployment frequency, code churn rate, Rework Rate vs Deployment Frequency scatter, FDRT trend with AI adoption overlay)."
+    },
+    {
+      "id": "ISSUE-013",
+      "title": "feat(notifications): weekly Slack digest + regression alerts to Slack",
+      "agent": "build",
+      "skills": ["build", "code-generation"],
+      "estimated_lines": 200,
+      "dependencies": ["ISSUE-004", "ISSUE-010"],
+      "acceptance_criteria": [
+        "notifications/digest/generate_digest.py queries latest dora_snapshots from Postgres, produces structured weekly digest",
+        "Digest content (per repo): five metrics current vs prior week, ✅/⚠️/❌ per metric, one \"Focus this week\" recommendation (worst-trending metric), Grafana link",
+        "Markdown output: notifications/digest/weekly-digest-YYYY-WW.md",
+        "notifications/slack/slack_webhook.py posts digest to SLACK_WEBHOOK_URL; gracefully skips with logged warning if not configured",
+        ".github/workflows/weekly-digest.yml runs Monday 8am UTC; manual dispatch also supported",
+        "Alertmanager receivers block in uFawkesObs routes dora_regression and leading_indicator alerts to DORA_SLACK_WEBHOOK_URL (distinct from other alert channels)",
+        "Alert Slack message format: metric name, current value, 30d baseline, trend emoji, runbook link — NOT a wall of text",
+        "Evidence: inject a metric regression via synthetic Prometheus data → alert fires → Slack message received within 5 minutes"
+      ],
+      "description": "Implement two notification channels: a weekly Markdown digest posted to Slack (or saved as file) summarizing DORA metrics, and Slack routing for regression alerts from Alertmanager to a dedicated DORA alerts channel."
+    },
+    {
+      "id": "ISSUE-014",
+      "title": "feat(notifications): PR-level lead time annotation",
+      "agent": "build",
+      "skills": ["build", "code-generation"],
+      "estimated_lines": 100,
+      "dependencies": ["ISSUE-003", "ISSUE-005"],
+      "acceptance_criteria": [
+        "notifications/pr_annotation/annotate.py reads PR event from Postgres, computes this PR's lead time, queries 30d P50 baseline, generates comment",
+        ".github/workflows/dora-pr-annotation.yml is reusable workflow, runs on PR merge",
+        "Comment format: lead time for this PR, team 30d P50, emoji (🚀 if faster, ⏱️ if slower), one-line note if >2x P50 (\"consider breaking this into smaller PRs\")",
+        "If ai_assisted: true: adds \"AI-assisted PR: lead time vs baseline tracked for AI impact dashboard\"",
+        "Disabled via DORA_PR_ANNOTATIONS: \"false\" repo variable",
+        "Posted by github-actions[bot], not a personal access token"
+      ],
+      "description": "Create a GitHub Action that posts a comment on every merged PR with its lead time contribution versus the team's 30-day P50 baseline, including coaching notes and AI-assisted tracking."
+    },
+    {
+      "id": "ISSUE-015",
+      "title": "feat(compute): value stream indicators — stage-level lead time breakdown",
+      "agent": "build",
+      "skills": ["build", "code-generation"],
+      "estimated_lines": 250,
+      "dependencies": ["ISSUE-003", "ISSUE-005", "ISSUE-004"],
+      "acceptance_criteria": [
+        "compute/vsi.py queries raw_events for pr-events and deployment-events, reconstructs stage durations for each commit-to-deploy journey",
+        "Writes to vsi_stage_breakdown table",
+        "Computes: value-add time (coding + CI + deploy), wait time (review + queue), VSM efficiency % (value-add / total)",
+        "Identifies primary bottleneck (highest wait time stage) with repo-level output",
+        "dashboards/value-stream.json is valid Grafana provisioning JSON showing stage breakdown waterfall + bottleneck highlight + efficiency trend",
+        "tests/unit/test_vsi.py with representative event fixture sequences"
+      ],
+      "description": "Implement compute/vsi.py to calculate Value Stream Indicators that break down lead time into stages (coding, review, CI, deploy, rework) to identify constraints and where AI productivity gains are being absorbed. Includes corresponding Grafana dashboard."
+    },
+    {
+      "id": "ISSUE-016",
+      "title": "docs(dojo): Yellow belt curriculum + Dojo integration",
+      "agent": "documentation",
+      "skills": ["documentation", "dojo-content"],
+      "estimated_lines": 150,
+      "dependencies": [],
+      "acceptance_criteria": [
+        "dojo-content/01-yellow-belt/dora-fundamentals.md explains the five DORA metrics and why they matter",
+        "dojo-content/01-yellow-belt/plane-model.md details the two-plane architecture (compute vs resource plane)",
+        "dojo-content/01-yellow-belt/event-schemas.md covers canonical event formats and how to emit them from CI/CD systems",
+        "dojo-content/01-yellow-belt/dashboards-overview.md walks through DORA Overview and Leading Indicators dashboards",
+        "dojo-content/01-yellow-belt/alerts-notifications.md explains regression-based alerting and notification channels",
+        "dojo-content/01-yellow-belt/hands-on-lab.md provides step-by-step guide to emit events and observe them in the system",
+        "All Dojo content follows uFawkes documentation standards with clear learning objectives and exercises",
+        "Content is discoverable via the uFawkesDojo navigation structure"
+      ],
+      "description": "Create Dojo educational content for Yellow Belt certification covering DORA fundamentals, the two-plane architecture, event schemas, dashboards, alerts, and hands-on labs. Content should be modular and integrate with the existing uFawkesDojo platform."
     }
   ],
   "dependency_graph": {
     "nodes": [
-      "TASK-001",
-      "TASK-002",
-      "TASK-003",
-      "TASK-004",
-      "TASK-005",
-      "TASK-006"
+      "ISSUE-001",
+      "ISSUE-002",
+      "ISSUE-003",
+      "ISSUE-004",
+      "ISSUE-005",
+      "ISSUE-006",
+      "ISSUE-007",
+      "ISSUE-008",
+      "ISSUE-009",
+      "ISSUE-010",
+      "ISSUE-011",
+      "ISSUE-012",
+      "ISSUE-013",
+      "ISSUE-014",
+      "ISSUE-015",
+      "ISSUE-016"
     ],
     "edges": [
-      ["TASK-001", "TASK-002"],
-      ["TASK-001", "TASK-003"],
-      ["TASK-002", "TASK-004"],
-      ["TASK-003", "TASK-004"],
-      ["TASK-004", "TASK-005"],
-      ["TASK-005", "TASK-006"]
+      ["ISSUE-001", "ISSUE-003"],
+      ["ISSUE-001", "ISSUE-004"],
+      ["ISSUE-002", "ISSUE-003"],
+      ["ISSUE-002", "ISSUE-004"],
+      ["ISSUE-002", "ISSUE-005"],
+      ["ISSUE-002", "ISSUE-006"],
+      ["ISSUE-003", "ISSUE-008"],
+      ["ISSUE-003", "ISSUE-009"],
+      ["ISSUE-003", "ISSOE-014"],
+      ["ISSUE-004", "ISSUE-008"],
+      ["ISSUE-004", "ISSUE-009"],
+      ["ISSUE-004", "ISSUE-010"],
+      ["ISSUE-004", "ISSUE-011"],
+      ["ISSUE-004", "ISSUE-012"],
+      ["ISSUE-004", "ISSUE-013"],
+      ["ISSUE-004", "ISSUE-015"],
+      ["ISSUE-005", "ISSUE-008"],
+      ["ISSUE-005", "ISSUE-009"],
+      ["ISSUE-005", "ISSUE-014"],
+      ["ISSUE-010", "ISSUE-013"],
+      ["ISSUE-011", "ISSUE-012"]
     ]
   },
   "summary": {
-    "total_tasks": 6,
-    "total_estimated_lines": 215,
+    "total_tasks": 16,
+    "total_estimated_lines": 3150,
     "critical_path": [
-      "TASK-001",
-      "TASK-003",
-      "TASK-004",
-      "TASK-005",
-      "TASK-006"
+      "ISSUE-001",
+      "ISSUE-002",
+      "ISSUE-003",
+      "ISSUE-004",
+      "ISSUE-011",
+      "ISSUE-012"
     ]
   }
 }
