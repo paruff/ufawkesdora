@@ -25,11 +25,7 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  pull-requests: write
-  security-events: write
-  actions: read
+permissions: {}  # deny all at workflow level; grant per job below
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -40,16 +36,25 @@ jobs:
   preflight:
     name: Pre-flight
     uses: ./.github/workflows/reusable-preflight.yml
+    permissions:
+      contents: read
+      pull-requests: read
     with:
       pr-size-limit: 0
 
   lint:
     name: Lint
     uses: ./.github/workflows/reusable-lint.yml
+    permissions:
+      contents: read
+      pull-requests: read
 
   security:
     name: Security Scan
     uses: ./.github/workflows/reusable-security-scanning.yml
+    permissions:
+      contents: read
+      security-events: write
     with:
       scan-type: secrets
       upload-sarif: false
@@ -59,6 +64,8 @@ jobs:
     name: Build & Validate
     needs: [preflight, lint, security]
     uses: ./.github/workflows/reusable-build.yml
+    permissions:
+      contents: read
     with:
       validate-prometheus: true
       validate-otel: true
@@ -72,6 +79,8 @@ jobs:
     name: Tests
     needs: [build]
     uses: ./.github/workflows/reusable-tests.yml
+    permissions:
+      contents: read
     with:
       test-tiers: "unit,compose-smoke,integration,e2e,docs"
       run-unit: true
@@ -80,6 +89,9 @@ jobs:
     name: Full Security Scan
     needs: [build]
     uses: ./.github/workflows/reusable-security-scanning.yml
+    permissions:
+      contents: read
+      security-events: write
     with:
       scan-type: all
       severity-threshold: MEDIUM
@@ -91,6 +103,9 @@ jobs:
     needs: [build]
     if: github.event_name == 'pull_request'
     uses: ./.github/workflows/reusable-dependency-review.yml
+    permissions:
+      contents: read
+      pull-requests: write
     with:
       fail-on-severity: moderate
       comment-summary-in-pr: "true"
@@ -102,6 +117,8 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
+    permissions:
+      contents: read
     steps:
       - name: Check results
         run: |

@@ -34,12 +34,13 @@ on:
         type: string
         default: ".gitleaks.toml"
 
-permissions:
-  contents: read
-  security-events: write
+permissions: {}  # deny all at workflow level; grant per job below
 
 jobs:
   security-scan:
+    permissions:
+      contents: read
+      security-events: write
     name: Security Scanning
     runs-on: ubuntu-latest
     timeout-minutes: 20

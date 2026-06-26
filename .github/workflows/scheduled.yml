@@ -32,6 +32,8 @@ on:
         type: string
         default: all
 
+permissions: {}  # deny all at workflow level; grant per job below
+
 jobs:
   # ─── Pre-commit Autoupdate ──────────────────────────────────────────
   pre-commit-autoupdate:

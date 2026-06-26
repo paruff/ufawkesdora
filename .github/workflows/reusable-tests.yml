@@ -73,12 +73,13 @@ on:
         description: "Database connection string for integration tests"
         required: false
 
-permissions:
-  contents: read
+permissions: {}  # deny all at workflow level; grant per job below
 
 jobs:
   # ─── Unit Tests (fast, no Docker) ──────────────────────────────────────
   unit-tests:
+    permissions:
+      contents: read
     name: Unit Tests
     if: contains(inputs.test-tiers, 'unit') && inputs.run-unit
     runs-on: ubuntu-latest
@@ -137,7 +138,9 @@ jobs:
     name: Compose Smoke
     if: contains(inputs.test-tiers, 'compose-smoke')
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - name: DORA job start
         run: |
@@ -208,6 +211,8 @@ jobs:
     if: contains(inputs.test-tiers, 'integration')
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - name: DORA job start
         run: |
@@ -283,6 +288,8 @@ jobs:
     if: contains(inputs.test-tiers, 'e2e')
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - name: DORA job start
         run: |
@@ -347,6 +354,8 @@ jobs:
     needs: [integration-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - name: DORA job start
         run: |
@@ -405,6 +414,8 @@ jobs:
     if: contains(inputs.test-tiers, 'docs')
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.1
 
@@ -472,6 +483,8 @@ jobs:
     if: contains(inputs.test-tiers, 'docs')
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.1
       - uses: DavidAnson/markdownlint-cli2-action@1628d9b2c73e580b4cb9b6b34303457a72478c5e  # v23.0.0
@@ -483,7 +496,9 @@ jobs:
     name: Check links
     if: contains(inputs.test-tiers, 'docs')
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.1
       - uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411  # v2.5.0
@@ -503,6 +518,8 @@ jobs:
     name: Test Summary
     runs-on: ubuntu-latest
     timeout-minutes: 2
+    permissions:
+      contents: read
     needs:
       - unit-tests
       - compose-smoke

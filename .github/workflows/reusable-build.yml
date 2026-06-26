@@ -64,11 +64,12 @@ on:
         type: string
         default: "compute,ingestion"
 
-permissions:
-  contents: read
+permissions: {}  # deny all at workflow level; grant per job below
 
 jobs:
   build-validate:
+    permissions:
+      contents: read
     name: Build & Validate
     runs-on: ubuntu-latest
     timeout-minutes: 10

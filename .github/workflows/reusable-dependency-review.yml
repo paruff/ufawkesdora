@@ -34,12 +34,13 @@ on:
         type: string
         default: ""
 
-permissions:
-  contents: read
-  pull-requests: write
+permissions: {}  # deny all at workflow level; grant per job below
 
 jobs:
   dependency-review:
+    permissions:
+      contents: read
+      pull-requests: write
     name: Dependency Review
     runs-on: ubuntu-latest
     timeout-minutes: 10
