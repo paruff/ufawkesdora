@@ -89,9 +89,10 @@ jobs:
   dependency-review:
     name: Dependency Review
     needs: [build]
+    if: github.event_name == 'pull_request'
     uses: ./.github/workflows/reusable-dependency-review.yml
     with:
-      fail-on-severity: high
+      fail-on-severity: moderate
       comment-summary-in-pr: "true"
 
   # ─── Gate: CI Complete ──────────────────────────────────────────────
