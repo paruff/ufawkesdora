@@ -29,3 +29,17 @@ Likely Cause: Default compose-file input is "compose.yaml" but the repo uses
               docker-compose.test.yml / docker-compose.integration.yml / docker-compose.dev.yml.
 Confidence:   HIGH
 Proposed Fix: Change default compose-file from "compose.yaml" to "docker-compose.test.yml".
+
+---
+
+Failure:      PR #23 blocked — "ValidateExpected" required check never reports
+Location:     GitHub ruleset `main-protection` (id 17553691)
+Evidence:     Ruleset requires status check context "Validate" but no workflow emits it.
+               Old ci.yml had a `validate` job (name: Validate) that was replaced by
+               preflight/lint/build/tests/etc. during PIPE-004 consolidation.
+               PR shows: "ValidateExpected — Waiting for status to be reported" (Required).
+Likely Cause: PIPE-004 consolidation removed the old `validate` job. The `main-protection`
+              ruleset still requires its check context `"Validate"` to pass.
+Confidence:   HIGH
+Proposed Fix: Update ruleset via API: change required_status_checks context from
+              `"Validate"` to `"CI / CI Complete"` (the new final pipeline gate).
