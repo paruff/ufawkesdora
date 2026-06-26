@@ -1,0 +1,27 @@
+groups:
+  - name: leading_indicator
+    interval: 1h
+    rules:
+      - alert: DoraLeadingIndicatorPRCycle
+        expr: |
+          histogram_quantile(0.90, rate(dora_pr_cycle_time_seconds_bucket[7d])) / 3600 > 24
+        for: 72h
+        labels:
+          severity: warning
+          category: leading_indicator
+        annotations:
+          summary: "PR cycle time P90 exceeds 24hrs for 72hrs"
+          description: "Leading indicator: Lead Time will increase if not addressed."
+          runbook_url: "https://github.com/paruff/uFawkesDORA/blob/main/docs/runbooks/leading-indicator-pr-cycle.md"
+
+      - alert: DoraLeadingIndicatorPRSize
+        expr: |
+          avg_over_time(dora_pr_size_lines_added[14d]) > (avg_over_time(dora_pr_size_lines_added[30d]) * 1.5)
+        for: 48h
+        labels:
+          severity: warning
+          category: leading_indicator
+        annotations:
+          summary: "PR size (lines added) 14-day average increased >50% vs 30-day average"
+          description: "Leading indicator: Rework Rate may increase due to larger PRs being harder to review."
+          runbook_url: "https://github.com/paruff/uFawkesDORA/blob/main/docs/runbooks/leading-indicator-pr-size.md"

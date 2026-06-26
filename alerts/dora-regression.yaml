@@ -1,0 +1,66 @@
+groups:
+  - name: dora_regression
+    interval: 1h
+    rules:
+      - alert: DoraDeploymentFrequencyDrop
+        expr: |
+          (
+            avg_over_time(dora_deployment_frequency_per_week[7d])
+            / avg_over_time(dora_deployment_frequency_per_week[30d])
+          ) < 0.70
+        for: 24h
+        labels:
+          severity: warning
+          category: dora_throughput
+        annotations:
+          summary: "Deployment frequency dropped >30% vs 30-day average"
+          description: "{{ $labels.repo }} deploying {{ $value | humanize }}x/wk vs 30d avg. Check for blocked PRs or migration in progress."
+          runbook_url: "https://github.com/paruff/uFawkesDORA/blob/main/docs/runbooks/deployment-frequency-drop.md"
+
+      - alert: DoraLeadTimeIncrease
+        expr: |
+          (avg_over_time(dora_lead_time_p50_hours[7d]) / avg_over_time(dora_lead_time_p50_hours[30d])) > 1.5
+        for: 48h
+        labels:
+          severity: warning
+          category: dora_throughput
+        annotations:
+          summary: "Lead time increased >50% vs 30-day average"
+          description: "{{ $labels.repo }} average lead time at {{ $value }}hrs vs 30d avg of {{ printf \"%.1f\" (avg_over_time(dora_lead_time_p50_hours[30d])) }}hrs. Check for increasing PR size or review bottlenecks."
+          runbook_url: "https://github.com/paruff/uFawkesDORA/blob/main/docs/runbooks/lead-time-increase.md"
+
+      - alert: DoraFDRTSpike
+        expr: |
+          dora_fdrt_p50_hours > (avg_over_time(dora_fdrt_p50_hours[30d]) * 2)
+        for: 6h
+        labels:
+          severity: critical
+          category: dora_throughput
+        annotations:
+          summary: "FDRT doubled vs 30-day average — throughput at risk"
+          description: "Recovery taking {{ $value }}hrs vs 30d avg. FDRT is a Throughput metric (DORA 2025) — this blocks re-deployment."
+          runbook_url: "https://github.com/paruff/uFawkesDORA/blob/main/docs/runbooks/fdrt-spike.md"
+
+      - alert: DoraCFRSpike
+        expr: |
+          dora_cfr_pct > (avg_over_time(dora_cfr_pct[30d]) + 5)
+        for: 24h
+        labels:
+          severity: warning
+          category: dora_stability
+        annotations:
+          summary: "Change Failure Rate +5 points above 30-day average"
+          description: "{{ $labels.repo }} CFR at {{ $value }}% vs 30d avg of {{ printf \"%.1f\" (avg_over_time(dora_cfr_pct[30d])) }}%. Check recent deployments for quality issues."
+          runbook_url: "https://github.com/paruff/uFawkesDORA/blob/main/docs/runbooks/cfr-spike.md"
+
+      - alert: DoraReworkRateClimb
+        expr: |
+          dora_rework_rate_pct > (avg_over_time(dora_rework_rate_pct[30d]) + 3)
+        for: 48h
+        labels:
+          severity: warning
+          category: dora_stability
+        annotations:
+          summary: "Rework Rate climbing — possible AI over-generation effect"
+          description: "Rework Rate at {{ $value }}% vs 30d avg. Per DORA 2025, Rework Rate is the primary AI quality signal. Check PR size trend in Leading Indicators dashboard."
+          runbook_url: "https://github.com/paruff/uFawkesDORA/blob/main/docs/runbooks/rework-rate-climb.md"
