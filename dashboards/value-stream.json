@@ -1,0 +1,912 @@
+{
+  "title": "Value Stream Indicators",
+  "uid": "dora-value-stream",
+  "version": 1,
+  "schemaVersion": 39,
+  "tags": [
+    "dora",
+    "ufawkes",
+    "value-stream",
+    "vsm"
+  ],
+  "description": "Value Stream Indicators (VSM) dashboard showing stage-level lead time breakdown, bottleneck identification, and efficiency trends \u2014 powered by DORA 2025 research on value stream mapping.",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m",
+      "15m",
+      "30m",
+      "1h",
+      "2h",
+      "1d"
+    ],
+    "time_options": [
+      "5m",
+      "15m",
+      "1h",
+      "6h",
+      "12h",
+      "24h",
+      "2d",
+      "7d",
+      "30d",
+      "90d"
+    ]
+  },
+  "refresh": "5m",
+  "editable": true,
+  "graphTooltip": 0,
+  "templating": {
+    "list": [
+      {
+        "name": "team",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "PostgreSQL"
+        },
+        "query": "SELECT DISTINCT source FROM raw_events ORDER BY source",
+        "refresh": 1,
+        "includeAll": true,
+        "allValue": "%",
+        "sort": 1,
+        "label": "Repo",
+        "multi": false
+      },
+      {
+        "name": "window",
+        "type": "interval",
+        "query": "7d,30d,90d",
+        "auto": false,
+        "auto_step": 30,
+        "refresh": 1,
+        "label": "Window",
+        "current": {
+          "text": "30d",
+          "value": "30d"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "",
+      "type": "text",
+      "gridPos": {
+        "h": 3,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "transparent": true,
+      "options": {
+        "content": "<div style=\"display: flex; justify-content: space-between; align-items: center; padding: 8px 16px;\"><div><h1 style=\"margin: 0;\">Value Stream Indicators</h1><span style=\"color: #888; font-size: 0.9em;\">Stage-level lead time breakdown \u2014 identify constraints and where AI productivity gains are being absorbed</span></div><div style=\"text-align: right;\"><span style=\"color: #aaa; font-size: 0.85em;\">Data from vsi_stage_breakdown (PostgreSQL) \u2014 DORA 2025 VSM model</span></div></div>",
+        "mode": "html"
+      }
+    },
+    {
+      "id": 2,
+      "title": "VSM Efficiency",
+      "type": "stat",
+      "datasource": {
+        "type": "postgres",
+        "uid": "PostgreSQL"
+      },
+      "description": "VSM Efficiency = value-add time (coding + deploy) / total lead time \u00d7 100. Higher is better. Low efficiency means work is spending too much time in wait stages (review, queue).",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 3
+      },
+      "targets": [
+        {
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "WITH stage_totals AS (\n  SELECT\n    s.deployment_id,\n    SUM(s.duration_seconds) FILTER (WHERE s.stage_name IN ('coding', 'deploy')) AS value_add_s,\n    SUM(s.duration_seconds) FILTER (WHERE s.stage_name = 'review') AS wait_s\n  FROM vsi_stage_breakdown s\n  JOIN raw_events r ON r.id = (s.metadata->>'pr_number')::int\n  WHERE s.recorded_at >= NOW() - INTERVAL '1 $window'\n    AND s.duration_seconds > 0\n  GROUP BY s.deployment_id\n)\nSELECT\n  ROUND(\n    SUM(value_add_s) * 100.0 / NULLIF(SUM(value_add_s + wait_s), 0),\n    1\n  ) AS vsm_efficiency_pct\nFROM stage_totals\nWHERE (value_add_s + wait_s) > 0;",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "id"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "timeColumn": "recorded_at",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 30
+              },
+              {
+                "color": "#6cc644",
+                "value": 50
+              },
+              {
+                "color": "green",
+                "value": 70
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "null": {
+                  "text": "No data"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "hide": false
+    },
+    {
+      "id": 3,
+      "title": "Primary Bottleneck",
+      "type": "stat",
+      "datasource": {
+        "type": "postgres",
+        "uid": "PostgreSQL"
+      },
+      "description": "The stage with the highest median duration \u2014 this is your primary constraint. Focus improvement efforts here first.",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 3
+      },
+      "targets": [
+        {
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "WITH stage_medians AS (\n  SELECT\n    stage_name,\n    percentile_cont(0.50) WITHIN GROUP (ORDER BY duration_seconds) AS p50_s\n  FROM vsi_stage_breakdown s\n  WHERE s.recorded_at >= NOW() - INTERVAL '1 $window'\n    AND s.duration_seconds > 0\n  GROUP BY s.stage_name\n)\nSELECT stage_name AS bottleneck\nFROM stage_medians\nORDER BY p50_s DESC\nLIMIT 1;",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "id"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "timeColumn": "recorded_at",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "#6cc644",
+                "value": 2
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "null": {
+                  "text": "No data"
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "coding": {
+                  "text": "Coding \u270d\ufe0f",
+                  "color": "orange"
+                },
+                "review": {
+                  "text": "Review \ud83d\udcdd",
+                  "color": "red"
+                },
+                "deploy": {
+                  "text": "Deploy \ud83d\ude80",
+                  "color": "green"
+                },
+                "ci": {
+                  "text": "CI \u2699\ufe0f",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "hide": false
+    },
+    {
+      "id": 4,
+      "title": "Total Journeys",
+      "type": "stat",
+      "datasource": {
+        "type": "postgres",
+        "uid": "PostgreSQL"
+      },
+      "description": "Number of commit-to-deploy journeys in the current window.",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 12,
+        "y": 3
+      },
+      "targets": [
+        {
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(DISTINCT deployment_id) AS journey_count\nFROM vsi_stage_breakdown s\nWHERE s.recorded_at >= NOW() - INTERVAL '1 $window';",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "id"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "timeColumn": "recorded_at",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "null": {
+                  "text": "No data"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "hide": false
+    },
+    {
+      "id": 5,
+      "title": "Avg Total Lead Time",
+      "type": "stat",
+      "datasource": {
+        "type": "postgres",
+        "uid": "PostgreSQL"
+      },
+      "description": "Average total lead time (coding + review + deploy) across all journeys.",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 16,
+        "y": 3
+      },
+      "targets": [
+        {
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  ROUND(AVG(stage_sum)::numeric, 0) AS avg_total_seconds\nFROM (\n  SELECT\n    deployment_id,\n    SUM(duration_seconds) AS stage_sum\n  FROM vsi_stage_breakdown s\n  WHERE s.recorded_at >= NOW() - INTERVAL '1 $window'\n    AND s.duration_seconds > 0\n  GROUP BY s.deployment_id\n) journey_totals;",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "id"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "timeColumn": "recorded_at",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 172800
+              },
+              {
+                "color": "red",
+                "value": 604800
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "null": {
+                  "text": "No data"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "hide": false
+    },
+    {
+      "id": 6,
+      "title": "Value-Add vs Wait Time",
+      "type": "stat",
+      "datasource": {
+        "type": "postgres",
+        "uid": "PostgreSQL"
+      },
+      "description": "Breakdown of total time into value-add (coding + deploy) and wait (review + queue).",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 20,
+        "y": 3
+      },
+      "targets": [
+        {
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  ROUND(SUM(duration_seconds) FILTER (WHERE stage_name IN ('coding', 'deploy'))::numeric, 0) AS value_add_s,\n  ROUND(SUM(duration_seconds) FILTER (WHERE stage_name = 'review')::numeric, 0) AS wait_s\nFROM vsi_stage_breakdown s\nWHERE s.recorded_at >= NOW() - INTERVAL '1 $window'\n  AND s.duration_seconds > 0;",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "id"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "timeColumn": "recorded_at",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "null": {
+                  "text": "No data"
+                }
+              }
+            }
+          ],
+          "custom": {
+            "displayMode": "list"
+          },
+          "reduceOptions": {
+            "values": true,
+            "calcs": []
+          }
+        },
+        "overrides": []
+      },
+      "hide": false
+    },
+    {
+      "id": 7,
+      "title": "Stage Duration Waterfall",
+      "type": "bargauge",
+      "datasource": {
+        "type": "postgres",
+        "uid": "PostgreSQL"
+      },
+      "description": "Median duration per stage. Red/orange stages are constraints \u2014 the tallest bar is your primary bottleneck.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "targets": [
+        {
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  s.stage_name,\n  ROUND(percentile_cont(0.50) WITHIN GROUP (ORDER BY s.duration_seconds)::numeric, 0) AS p50_seconds,\n  ROUND(AVG(s.duration_seconds)::numeric, 0) AS avg_seconds,\n  ROUND(percentile_cont(0.95) WITHIN GROUP (ORDER BY s.duration_seconds)::numeric, 0) AS p95_seconds,\n  COUNT(*)::int AS sample_count\nFROM vsi_stage_breakdown s\nWHERE s.recorded_at >= NOW() - INTERVAL '1 $window'\n  AND s.duration_seconds > 0\nGROUP BY s.stage_name\nORDER BY p50_seconds DESC;",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "id"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "timeColumn": "recorded_at",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 43200
+              },
+              {
+                "color": "red",
+                "value": 172800
+              }
+            ]
+          },
+          "mappings": [],
+          "min": 0,
+          "custom": {
+            "orientation": "horizontal",
+            "displayMode": "gradient",
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "stage_name"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Stage"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p50_seconds"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "P50 Duration (s)"
+              }
+            ]
+          }
+        ]
+      },
+      "hide": false
+    },
+    {
+      "id": 8,
+      "title": "Stage Duration Details",
+      "type": "table",
+      "datasource": {
+        "type": "postgres",
+        "uid": "PostgreSQL"
+      },
+      "description": "Detailed stage statistics including sample count, average, P50, and P95 durations.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "targets": [
+        {
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  s.stage_name AS \"Stage\",\n  COUNT(*)::int AS \"Count\",\n  ROUND(AVG(s.duration_seconds)::numeric, 0) AS \"Avg (s)\",\n  ROUND(percentile_cont(0.50) WITHIN GROUP (ORDER BY s.duration_seconds)::numeric, 0) AS \"P50 (s)\",\n  ROUND(percentile_cont(0.95) WITHIN GROUP (ORDER BY s.duration_seconds)::numeric, 0) AS \"P95 (s)\",\n  CASE\n    WHEN s.stage_name IN ('coding', 'deploy') THEN 'Value-add'\n    WHEN s.stage_name = 'review' THEN 'Wait'\n    ELSE 'Other'\n  END AS \"Type\"\nFROM vsi_stage_breakdown s\nWHERE s.recorded_at >= NOW() - INTERVAL '1 $window'\n  AND s.duration_seconds > 0\nGROUP BY s.stage_name\nORDER BY s.stage_name;",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "id"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "timeColumn": "recorded_at",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Stage"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 120
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Type"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              },
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Count"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          }
+        ]
+      },
+      "hide": false
+    },
+    {
+      "id": 9,
+      "title": "VSM Efficiency Trend",
+      "type": "timeseries",
+      "datasource": {
+        "type": "postgres",
+        "uid": "PostgreSQL"
+      },
+      "description": "VSM efficiency trend over time \u2014 upward trend means more time is spent on value-add work vs waiting.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "targets": [
+        {
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "WITH weekly AS (\n  SELECT\n    date_trunc('week', s.recorded_at) AS week,\n    s.deployment_id,\n    SUM(s.duration_seconds) FILTER (WHERE s.stage_name IN ('coding', 'deploy')) AS value_add_s,\n    SUM(s.duration_seconds) FILTER (WHERE s.stage_name = 'review') AS wait_s\n  FROM vsi_stage_breakdown s\n  WHERE s.recorded_at >= NOW() - INTERVAL '90 days'\n    AND s.duration_seconds > 0\n  GROUP BY date_trunc('week', s.recorded_at), s.deployment_id\n)\nSELECT\n  week AS \"time\",\n  ROUND(\n    SUM(value_add_s) * 100.0 / NULLIF(SUM(value_add_s + wait_s), 0),\n    1\n  ) AS value\nFROM weekly\nWHERE (value_add_s + wait_s) > 0\nGROUP BY week\nORDER BY week;",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "id"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "timeColumn": "recorded_at",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [],
+          "min": 0,
+          "max": 100,
+          "custom": {
+            "lineInterpolation": "smooth",
+            "spanNulls": true,
+            "showPoints": "never",
+            "fillOpacity": 20
+          }
+        },
+        "overrides": []
+      },
+      "hide": false,
+      "maxDataPoints": 100
+    },
+    {
+      "id": 10,
+      "title": "Bottleneck Highlight",
+      "type": "table",
+      "datasource": {
+        "type": "postgres",
+        "uid": "PostgreSQL"
+      },
+      "description": "Journeys where the bottleneck stage is above threshold \u2014 actionable list of deployments to investigate.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "targets": [
+        {
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "WITH journey_stages AS (\n  SELECT\n    s.deployment_id,\n    s.stage_name,\n    s.duration_seconds,\n    MAX(s.duration_seconds) OVER (PARTITION BY s.deployment_id) AS max_duration\n  FROM vsi_stage_breakdown s\n  WHERE s.recorded_at >= NOW() - INTERVAL '1 $window'\n    AND s.duration_seconds > 0\n)\nSELECT\n  deployment_id AS \"Deployment\",\n  stage_name AS \"Bottleneck Stage\",\n  duration_seconds AS \"Duration (s)\",\n  ROUND(duration_seconds / 3600.0, 1) AS \"Duration (h)\"\nFROM journey_stages\nWHERE duration_seconds = max_duration\nORDER BY duration_seconds DESC\nLIMIT 20;",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "id"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "timeColumn": "recorded_at",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 86400
+              },
+              {
+                "color": "red",
+                "value": 604800
+              }
+            ]
+          },
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Bottleneck Stage"
+            },
+            "properties": [
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 1
+                    },
+                    {
+                      "color": "red",
+                      "value": 2
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "review": {
+                        "color": "red",
+                        "text": "\ud83d\udcdd Review"
+                      },
+                      "coding": {
+                        "color": "orange",
+                        "text": "\u270d\ufe0f Coding"
+                      },
+                      "deploy": {
+                        "color": "green",
+                        "text": "\ud83d\ude80 Deploy"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "hide": false
+    },
+    {
+      "id": 11,
+      "title": "About Value Stream Indicators",
+      "type": "text",
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "transparent": true,
+      "options": {
+        "content": "<div style=\"padding: 8px 16px;\">\n<h3>About This Dashboard</h3>\n<p>\nValue Stream Indicators (VSM) break down total lead time into five stages to identify where time is actually spent — and where AI productivity gains are being absorbed rather than delivered. \nBased on the <strong>2025 DORA research on Value Stream Mapping</strong>, this is the diagnostic layer above the five delivery metrics.\n</p>\n<table style=\"width: 100%; border-collapse: collapse; margin-top: 8px;\">\n<tr style=\"border-bottom: 1px solid #444;\">\n<th style=\"padding: 4px 8px; text-align: left;\">Stage</th>\n<th style=\"padding: 4px 8px; text-align: left;\">Type</th>\n<th style=\"padding: 4px 8px; text-align: left;\">Measurement</th>\n<th style=\"padding: 4px 8px; text-align: left;\">Requires</th>\n</tr>\n<tr style=\"border-bottom: 1px solid #333;\">\n<td style=\"padding: 4px 8px;\">Coding</td>\n<td style=\"padding: 4px 8px;\">Value-add</td>\n<td style=\"padding: 4px 8px;\">pr_opened_at - first_commit_at</td>\n<td style=\"padding: 4px 8px;\">first_commit_at in PR event</td>\n</tr>\n<tr style=\"border-bottom: 1px solid #333;\">\n<td style=\"padding: 4px 8px;\">Review</td>\n<td style=\"padding: 4px 8px;\">Wait</td>\n<td style=\"padding: 4px 8px;\">pr_merged_at - pr_opened_at</td>\n<td style=\"padding: 4px 8px;\">PR events (opened + merged)</td>\n</tr>\n<tr style=\"border-bottom: 1px solid #333;\">\n<td style=\"padding: 4px 8px;\">CI</td>\n<td style=\"padding: 4px 8px;\">Value-add</td>\n<td style=\"padding: 4px 8px;\">ci_completed_at - pr_merged_at</td>\n<td style=\"padding: 4px 8px;\">CI pipeline events (v0.2+)</td>\n</tr>\n<tr style=\"border-bottom: 1px solid #333;\">\n<td style=\"padding: 4px 8px;\">Deploy</td>\n<td style=\"padding: 4px 8px;\">Value-add</td>\n<td style=\"padding: 4px 8px;\">deployed_at - pr_merged_at</td>\n<td style=\"padding: 4px 8px;\">Deployment events</td>\n</tr>\n<tr style=\"border-bottom: 1px solid #333;\">\n<td style=\"padding: 4px 8px;\">Rework</td>\n<td style=\"padding: 4px 8px;\">Wait</td>\n<td style=\"padding: 4px 8px;\">rework_triggered_at - deployed_at</td>\n<td style=\"padding: 4px 8px;\">Rework events (v0.2+)</td>\n</tr>\n</table>\n<p style=\"margin-top: 8px; color: #888; font-size: 0.9em;\">\n<strong>VSM Efficiency</strong> = (coding + CI + deploy) / total lead time × 100. \nCI stage is null for v0.1 (requires CI event schema). Rework stage is null for v0.1 (requires linked rework events).\n</p>\n</div>",
+        "mode": "html"
+      }
+    }
+  ]
+}

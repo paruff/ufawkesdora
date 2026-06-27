@@ -1,85 +1,71 @@
-# Test Report for Issue #12: feat(dashboards): Archetype Profile + AI Impact dashboards
+# Test Report — Issue 15: Value Stream Indicators
 
-## Overview
-This test report validates the two Grafana dashboards created for Issue #12 against the acceptance criteria specified in the issue.
+## Test Results
 
-## Files Tested
-1. `dashboards/archetype-profile.json`
-2. `dashboards/ai-impact.json`
+**Overall: PASS** ✅ — 30/30 tests passing, 0 failures, 0 errors
 
-## Validation Method
-- JSON syntax validation using `python -m json.tool`
-- Structural validation against acceptance criteria (static analysis)
-- Verification of required panels, data sources, and configurations
-- Note: Actual Grafana rendering and plugin availability cannot be tested in this environment
+| Test Suite | Tests | Passed | Failed |
+|-----------|-------|--------|--------|
+| `test_vsi.py` | 30 | 30 | 0 |
+| Existing tests (no regression) | — | All pre-passing tests still pass | — |
 
-## Results
+## Acceptance Criteria Verification
 
-### 1. Archetype Profile Dashboard (`dashboards/archetype-profile.json`)
+| AC | Description | Test Coverage | Result |
+|----|-------------|--------------|--------|
+| AC-01 | `compute/vsi.py` queries raw_events, reconstructs stage durations | `test_coding_stage_correct`, `test_review_stage_correct`, `test_deploy_stage_links_nearest_deployment`, `test_ci_stage_skipped`, `test_skip_pr_without_opened_at`, `test_multiple_deployments_same_repo` | ✅ PASS |
+| AC-02 | Writes to vsi_stage_breakdown table | `test_write_stage_breakdown`, `test_write_stage_breakdown_empty` | ✅ PASS |
+| AC-03 | Computes value-add time, wait time, VSM efficiency % | `test_vsm_efficiency_calculation`, `test_value_add_wait_breakdown` | ✅ PASS |
+| AC-04 | Identifies primary bottleneck (highest wait time stage) | `test_bottleneck_identification`, `test_bottleneck_prefers_nonzero_stages`, `test_aggregate_stage_stats` | ✅ PASS |
+| AC-05 | `dashboards/value-stream.json` Grafana dashboard | Valid Grafana provisioning JSON with 11 panels including waterfall, bottleneck highlight, efficiency trend | ✅ PASS |
+| AC-06 | `tests/unit/test_vsi.py` with representative event fixture sequences | 30 tests covering stage computation, VSM metrics, bottleneck, edge cases, DB mocking, CLI, formatting | ✅ PASS |
 
-#### JSON Validity
-- ✅ Valid JSON
+## Detailed Test Breakdown
 
-#### Acceptance Criteria Check
+### TestComputeDeploymentId (1 test)
+- `test_generates_correct_id` ✅
 
-| Criteria | Status | Notes |
-|----------|--------|-------|
-| Archetype name stat panel (prominent) | ✅ | Panel ID 2: Stat panel showing archetype from archetype_history table |
-| Radar chart: five metrics normalized 0-1, overlaid with archetype centroid | ⚠️ | Panel ID 5: Radar chart panel type (requires Grafana radar chart plugin to be installed in uFawkesObs). The query correctly retrieves normalized metrics and archetype centroids. |
-| Confidence stat panel with colour: green (≥0.75), yellow (0.5-0.75), red (<0.5) | ✅ | Panel ID 3: Stat panel with threshold coloring as specified |
-| "Confidence limited — no wellbeing survey data" text panel when confidence < 0.65 | ✅ | Panel ID 4: Stat panel with value mapping shows warning when confidence < 0.65 |
-| Two recommendation text panels keyed to archetype (static text; no LLM calls) | ✅ | Panel IDs 6 & 7: Text panels with archetype-specific recommendations via CASE statements |
-| Link to compute/archetype_survey.md | ✅ | Panel ID 1: Includes clickable link to the wellbeing survey documentation in the header |
+### TestComputePRStages (7 tests)
+- `test_coding_stage_correct` ✅ — Coding time = opened_at - first_commit_at
+- `test_review_stage_correct` ✅ — Review time = merged_at - opened_at
+- `test_deploy_stage_links_nearest_deployment` ✅ — Deploy time matches closest deployment after merge
+- `test_deploy_pending_when_no_deployment` ✅ — Deploy is "pending" when no deployment found
+- `test_ci_stage_skipped` ✅ — CI stage is skipped for v0.1
+- `test_skip_pr_without_opened_at` ✅ — PRs with missing timestamps are skipped
+- `test_multiple_deployments_same_repo` ✅ — Correct deployment matching with multiple deployments
 
-#### Additional Observations
-- Uses PostgreSQL datasource (uid: PostgreSQL) as expected
-- Templating includes team variable for switching between teams
-- Panel layout follows a logical flow: header, archetype/confidence, warning, radar chart, recommendations
-- All queries reference the expected tables: archetype_history
-- The radar chart panel type "radar" is used - this requires the Grafana Radar chart plugin (by Grafana Labs) to be installed in the target uFawkesObs instance
+### TestComputeVSMMetrics (5 tests)
+- `test_vsm_efficiency_calculation` ✅ — 71.4% efficiency with 9k value-add / 12.6k total
+- `test_bottleneck_identification` ✅ — Review identified as bottleneck (highest median)
+- `test_value_add_wait_breakdown` ✅ — Value-add = coding+deploy, Wait = review
+- `test_bottleneck_prefers_nonzero_stages` ✅ — CI (0) excluded from bottleneck calc
+- `test_aggregate_stage_stats` ✅ — avg, p50, p95, sample_count per stage
 
-### 2. AI Impact Dashboard (`dashboards/ai-impact.json`)
+### TestFormatDuration (4 tests)
+- Seconds, minutes, hours, days formatting ✅
 
-#### JSON Validity
-- ✅ Valid JSON
+### TestParseArgs (7 tests)
+- Defaults, custom window, team filter, pushgateway, verbose, JSON, short flags ✅
 
-#### Acceptance Criteria Check
+### TestVSIDB (4 tests)
+- `test_init_requires_dsn` ✅
+- `test_init_uses_env_var` ✅
+- `test_write_stage_breakdown` ✅
+- `test_write_stage_breakdown_empty` ✅
 
-| Criteria | Status | Notes |
-|----------|--------|-------|
-| PR size 14-day MA panel with DORA 2025 reference annotation | ✅ | Panel ID 2: Timeseries showing 14-day moving average of PR lines added. Includes AI-assisted average as dashed line. Description contains: "AI inflates PR size 50-150% — monitor Rework Rate for quality signal (DORA 2025)" |
-| Rework Rate vs Deployment Frequency time series (dual-axis): "faster but messier" quadrant | ✅ | Panel ID 5: Timeseries with dual-axis configuration. Left axis: Rework Rate (%), Right axis: Deployments/Week. The description explains the "faster but messier" quadrant concept. |
-| Code churn rate panel (lines changed within 14 days of original commit / total lines) | ⚠️ | Panel ID 3: Stat panel currently shows placeholder text "[PLACEHOLDER - requires commit data implementation]". The SQL query returns 'N/A' as value. This panel requires integration with commit data to calculate actual code churn. |
-| FDRT trend panel | ✅ | Panel ID 4: Timeseries showing FDRT trend over 30 days with appropriate thresholds (green <1h, orange <24h, red >24h) |
-| ai_assisted annotation line when available | ✅ | Panel ID 2: Includes a dashed line representing AI-assisted PR average (when ai_assisted flag is present in PR events) |
+### TestPrintVSMTable (2 tests)
+- `test_prints_with_data` ✅
+- `test_prints_empty` ✅
 
-#### Additional Observations
-- Uses PostgreSQL datasource (uid: PostgreSQL) as expected
-- Templating includes team variable for switching between teams
-- Panel layout: header, PR size trend, code churn (placeholder), FDRT trend, Rework Rate vs DF
-- All queries reference expected tables: raw_events (for PR data) and dora_snapshots (for metrics)
-- The "ai_assisted" annotation is implemented via a conditional average in the PR size query, showing separate lines for overall and AI-assisted PRs
-- The FDRT panel correctly notes it is a Throughput metric (not MTTR) per DORA 2025
+## Lint Results
 
-## Summary
-- **archetype-profile.json**: Meets all acceptance criteria assuming the Grafana radar chart plugin is available. The dashboard is structurally correct and ready for deployment pending plugin installation.
-- **ai-impact.json**: Meets most acceptance criteria. The code churn rate panel requires implementation (currently a placeholder). All other panels are fully functional per the specifications.
+| File | Status |
+|------|--------|
+| `compute/vsi.py` | ✅ Clean |
+| `tests/unit/test_vsi.py` | ✅ Clean |
 
-## Blockers and Recommendations
-1. **Archetype Profile Dashboard**:
-   - Requires installation of the Grafana "Radar chart" plugin (by Grafana Labs) in uFawkesObs
-   - Without this plugin, the radar chart panel will not render correctly
+## Risks
 
-2. **AI Impact Dashboard**:
-   - The code churn rate panel (ID 3) requires implementation to calculate actual code churn from commit data
-   - Current placeholder should be replaced with a query that computes: (lines changed in last 14 days) / (total lines in repository)
-   - This requires access to commit data, which may not be in the current raw_events schema
-
-## Next Steps
-1. For archetype-profile.json: Document the radar plugin requirement in the dashboard notes or deployment documentation
-2. For ai-impact.json: Implement the code churn calculation once commit data is available in the event stream
-3. Both dashboards should be deployed to a staging uFawkesObs instance for functional validation
-4. After addressing the above, proceed to review phase
-
----
-*Test report generated automatically as part of the feature development lifecycle.*
+- **No regression risk**: All new tests pass, existing passing tests unaffected
+- **CI events not defined**: CI stage is skipped for v0.1 (documented in spec §7)
+- **JSON dashboard**: The `dashboards/value-stream.json` is a Grafana provisioning file; it's not validated by Python tools. It follows the same format as existing dashboards (`dora-overview.json`, `leading-indicators.json`, etc.)
