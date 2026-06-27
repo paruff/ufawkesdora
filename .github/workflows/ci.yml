@@ -15,6 +15,10 @@
 #
 # Deploy (Phase 4) and post-deploy (Phase 5) moved to release.yml.
 #
+# Test tier split (AUDIT-003):
+#   PR gate (ci.yml):        unit, docs (fast, < 5 min)
+#   Nightly (scheduled.yml): compose-smoke, integration, e2e (heavy tiers)
+#
 # ── Pipeline contract (inlined from .pipeline.yml) ──────────────────────
 #
 # pipeline:
@@ -133,7 +137,7 @@ jobs:
     permissions:
       contents: read
     with:
-      test-tiers: "unit,compose-smoke,integration,e2e,docs"
+      test-tiers: "unit,docs"
       run-unit: true
 
   full-security:

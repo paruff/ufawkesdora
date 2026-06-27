@@ -6,6 +6,7 @@
 # workflow_dispatch. Each job declares its own minimal permissions.
 #
 # Jobs:
+#   integration-tests      — Nightly integration, compose-smoke & E2E tests
 #   pre-commit-autoupdate  — Updates pre-commit hook versions every Monday
 #                            and opens a PR if changes are detected.
 #   compute-dora-metrics   — Daily DORA metrics computation from TimescaleDB.
@@ -15,6 +16,8 @@ name: Scheduled Maintenance
 
 on:
   schedule:
+    # Nightly at 02:00 UTC — integration & E2E tests
+    - cron: "0 2 * * *"
     # Every Monday at 09:00 UTC — pre-commit autoupdate
     - cron: "0 9 * * 1"
     # Daily at 06:00 UTC — DORA metrics computation
@@ -60,6 +63,17 @@ jobs:
           title: "chore(pre-commit): weekly hook version update"
           branch: chore/pre-commit-autoupdate
           labels: "type-chore,comp-pre-commit"
+
+  # ─── Integration & E2E Tests (nightly) ──────────────────────────────
+  integration-tests:
+    name: Integration & E2E Tests
+    if: github.event_name != 'schedule' || github.event.schedule == '0 2 * * *'
+    uses: ./.github/workflows/reusable-tests.yml
+    permissions:
+      contents: read
+    with:
+      test-tiers: "compose-smoke,integration,e2e"
+      run-unit: false
 
   # ─── Compute DORA Metrics ───────────────────────────────────────────
   compute-dora-metrics:
