@@ -89,7 +89,7 @@ jobs:
   # ─── Phase 1: Pre-Commit ──────────────────────────────────────────────
   preflight:
     name: Pre-flight
-    uses: paruff/ufawkespipe/.github/workflows/reusable-preflight.yml@v1.0.0
+    uses: paruff/ufawkespipe/.github/workflows/reusable-preflight.yml@v1.1.0
     permissions:
       contents: read
       pull-requests: read
@@ -98,14 +98,14 @@ jobs:
 
   lint:
     name: Lint
-    uses: paruff/ufawkespipe/.github/workflows/reusable-lint.yml@v1.0.0
+    uses: paruff/ufawkespipe/.github/workflows/reusable-lint.yml@v1.1.0
     permissions:
       contents: read
       pull-requests: read
 
   security:
     name: Security Scan
-    uses: paruff/ufawkespipe/.github/workflows/reusable-security-scanning.yml@v1.0.0
+    uses: paruff/ufawkespipe/.github/workflows/reusable-security-scanning.yml@v1.1.0
     permissions:
       contents: read
       security-events: write
@@ -117,7 +117,7 @@ jobs:
   build:
     name: Build & Validate
     needs: [preflight, lint, security]
-    uses: paruff/ufawkespipe/.github/workflows/reusable-build.yml@v1.0.0
+    uses: paruff/ufawkespipe/.github/workflows/reusable-build.yml@v1.1.0
     permissions:
       contents: read
     with:
@@ -133,7 +133,7 @@ jobs:
   tests:
     name: Tests
     needs: [build]
-    uses: paruff/ufawkespipe/.github/workflows/reusable-tests.yml@v1.0.0
+    uses: paruff/ufawkespipe/.github/workflows/reusable-tests.yml@v1.1.0
     permissions:
       contents: read
     with:
@@ -143,7 +143,7 @@ jobs:
   full-security:
     name: Full Security Scan
     needs: [build]
-    uses: paruff/ufawkespipe/.github/workflows/reusable-security-scanning.yml@v1.0.0
+    uses: paruff/ufawkespipe/.github/workflows/reusable-security-scanning.yml@v1.1.0
     permissions:
       contents: read
       security-events: write
@@ -157,7 +157,7 @@ jobs:
     name: Dependency Review
     needs: [build]
     if: github.event_name == 'pull_request'
-    uses: paruff/ufawkespipe/.github/workflows/reusable-dependency-review.yml@v1.0.0
+    uses: paruff/ufawkespipe/.github/workflows/reusable-dependency-review.yml@v1.1.0
     permissions:
       contents: read
       pull-requests: write

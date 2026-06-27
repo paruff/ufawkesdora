@@ -68,7 +68,7 @@ jobs:
   integration-tests:
     name: Integration & E2E Tests
     if: github.event_name != 'schedule' || github.event.schedule == '0 2 * * *'
-    uses: paruff/ufawkespipe/.github/workflows/reusable-tests.yml@v1.0.0
+    uses: paruff/ufawkespipe/.github/workflows/reusable-tests.yml@v1.1.0
     permissions:
       contents: read
     with:
