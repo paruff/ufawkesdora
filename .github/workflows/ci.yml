@@ -122,7 +122,8 @@ jobs:
       validate-tempo: true
       validate-grafana: true
       fail-on-latest: true
-      enable-coverage-gate: false
+      enable-coverage-gate: true
+      coverage-threshold: 60
 
   # ─── Phase 3: Pre-Deployment ─────────────────────────────────────────
   tests:

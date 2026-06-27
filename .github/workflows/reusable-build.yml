@@ -47,12 +47,12 @@ on:
         description: "Enable coverage quality gate"
         required: false
         type: boolean
-        default: false
+        default: true
       coverage-threshold:
         description: "Minimum coverage percentage for quality gate"
         required: false
         type: number
-        default: 80
+        default: 60
       python-version:
         description: "Python version for coverage gate"
         required: false
