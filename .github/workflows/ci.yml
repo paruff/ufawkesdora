@@ -191,11 +191,18 @@ jobs:
              [ "${{ needs.security.result }}" == "failure" ] || \
              [ "${{ needs.build.result }}" == "failure" ] || \
              [ "${{ needs.tests.result }}" == "failure" ] || \
-             [ "${{ needs.full-security.result }}" == "failure" ] || \
-             [ "${{ needs.dependency-review.result }}" == "failure" ]; then
+             [ "${{ needs.full-security.result }}" == "failure" ]; then
             echo ""
             echo "CI FAILED"
             exit 1
+          fi
+
+          # Dependency review: only required on pull_request; skipped on push is OK
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            if [ "${{ needs.dependency-review.result }}" != "success" ]; then
+              echo "FAIL: Dependency review required on PR but did not pass"
+              exit 1
+            fi
           fi
 
           echo ""
@@ -220,4 +227,4 @@ jobs:
           echo "| Build & Validate | ${{ needs.build.result == 'success' && 'Pass' || 'Fail' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Tests | ${{ needs.tests.result == 'success' && 'Pass' || 'Fail' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Security (full) | ${{ needs.full-security.result == 'success' && 'Pass' || 'Fail' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Dependency Review | ${{ needs.dependency-review.result == 'success' && 'Pass' || 'Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dependency Review | ${{ needs.dependency-review.result == 'success' && 'Pass' || needs.dependency-review.result == 'skipped' && 'N/A' || 'Fail' }} |" >> $GITHUB_STEP_SUMMARY
