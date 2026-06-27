@@ -19,6 +19,15 @@ This project enforces a strict GitOps development workflow. Direct commits or pu
 4. **Verification**: The 5-Phase pipeline (Pre-Commit → Post-Commit → Pre-Deployment → Deploy → Post-Deployment) executes on your PR. All checks in Phase 1 (Pre-Commit), Phase 2 (Post-Commit), and Phase 3 (Pre-Deployment) must pass before the PR is mergeable.
 5. **No Direct Commits**: Never push or commit directly to `main`. Merging a PR is the only way code reaches `main`.
 
+### PR Size Limit
+
+We encourage keeping pull requests small and focused. The CI pipeline warns when a PR exceeds **400 lines changed** (additions + deletions). This is a **non-blocking guidance** — large PRs still pass CI — but a comment is posted to encourage splitting into smaller chunks.
+
+- **Limit**: 400 lines changed
+- **Behavior**: Warning only (does not block the PR)
+- **Override**: Apply the `large-pr-approved` label to suppress the warning
+- **Emergency bypass**: Apply the `emergency-bypass` label to skip all preflight checks
+
 ### Commit Message Guidelines
 
 We enforce the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) format for all commits. A pre-flight validator runs in CI to verify adherence. Commits with invalid structures or descriptions that are too long will fail the pipeline.

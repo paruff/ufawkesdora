@@ -94,7 +94,7 @@ jobs:
       contents: read
       pull-requests: read
     with:
-      pr-size-limit: 0
+      pr-size-limit: 400
 
   lint:
     name: Lint
