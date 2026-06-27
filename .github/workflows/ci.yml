@@ -14,6 +14,56 @@
 #                      reusable-dependency-review
 #
 # Deploy (Phase 4) and post-deploy (Phase 5) moved to release.yml.
+#
+# ── Pipeline contract (inlined from .pipeline.yml) ──────────────────────
+#
+# pipeline:
+#   version: 2
+#   name: uFawkesDORA
+#   type: config
+#
+# gates:
+#   preflight:
+#     required: true
+#     checks: [pre-commit, commit-format, pr-size]
+#   lint:
+#     required: true
+#     tools: [yamllint, markdownlint, prettier]
+#   security:
+#     required: true
+#     tools: [gitleaks, detect-secrets]
+#   build:
+#     required: true
+#     steps: [config-validate]
+#   tests:
+#     required: true
+#     tiers:
+#       unit:
+#         required: true
+#         command: pytest tests/unit/ -v --tb=short
+#         coverage: {total: 60, diff: 80}
+#   deploy:
+#     required: false
+#     steps: [config-deploy]
+#
+# supply-chain:
+#   sbom:             {enabled: false}
+#   image-signing:    {enabled: false}
+#   attestation:     {enabled: false}
+#   container-scan:  {enabled: false}
+#
+# stages:
+#   - {name: preflight, parallel: false}
+#   - {name: lint,      parallel: true}
+#   - {name: security,  parallel: true}
+#   - {name: build,     parallel: false}
+#   - {name: tests,     parallel: true}
+#   - {name: deploy,    parallel: false}
+#
+# environments:
+#   dev:        {auto-deploy: true,  branch: main}
+#   staging:    {auto-deploy: false, branch: "release/*"}
+#   production: {auto-deploy: false, branch: "v*"}
 # ============================================================================
 
 name: CI
