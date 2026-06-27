@@ -1,0 +1,42 @@
+name: Weekly DORA Digest
+
+on:
+  schedule:
+    - cron: '0 8 * * 1'  # Monday 8:00 AM UTC
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  generate-digest:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install asyncpg aiohttp
+
+      - name: Generate digest
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          python notifications/digest/generate_digest.py \
+            --grafana-url "https://grafana.example.com" \
+            --slack-webhook "$SLACK_WEBHOOK_URL"
+
+      - name: Upload digest as artifact
+        if: always()  # Upload even if previous step fails
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-digest
+          path: notifications/digest/
+          retention-days: 30
