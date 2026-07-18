@@ -89,7 +89,7 @@ jobs:
   # ─── Phase 1: Pre-Commit ──────────────────────────────────────────────
   preflight:
     name: Pre-flight
-    uses: paruff/ufawkespipe/.github/workflows/reusable-preflight.yml@v1.1.0
+    uses: paruff/ufawkespipe/.github/workflows/reusable-preflight.yml@v1.1.1
     permissions:
       contents: read
       pull-requests: read
@@ -157,7 +157,7 @@ jobs:
     name: Dependency Review
     needs: [build]
     if: github.event_name == 'pull_request'
-    uses: paruff/ufawkespipe/.github/workflows/reusable-dependency-review.yml@v1.1.0
+    uses: paruff/ufawkespipe/.github/workflows/reusable-dependency-review.yml@v1.1.1
     permissions:
       contents: read
       pull-requests: write
