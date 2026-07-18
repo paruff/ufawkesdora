@@ -89,7 +89,7 @@ jobs:
   # ─── Phase 1: Pre-Commit ──────────────────────────────────────────────
   preflight:
     name: Pre-flight
-    uses: paruff/ufawkespipe/.github/workflows/reusable-preflight.yml@v1.1.0
+    uses: paruff/ufawkespipe/.github/workflows/reusable-preflight.yml@v1.1.1
     permissions:
       contents: read
       pull-requests: read
