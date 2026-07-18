@@ -65,3 +65,19 @@ fix: correct DataFrame column ordering in metrics calc
 ci: pin actions to SHA in reusable workflows
 test(compute): cover all seven archetypes with fixture data
 ```
+
+## Context Files
+
+| File | Why |
+|---|---|
+| `docs/PR_STANDARD.md` | PR naming, branch rules, CI requirements |
+
+## §8 — GitOps / Trunk-Based Delivery Contract
+
+### Deployment Lifecycle Gates
+
+1. **Main CI must be green before any PR merges.** Enforced by `main-ci-guard.yml` calling `reusable-main-ci-guard@v1.2.0`.
+2. **Observability is built-in.** `job-start` / `job-finish` timestamp steps on all CI jobs for traceability.
+3. **All work on short-lived feature branches off `main`.** No direct commits to `main`.
+4. **Every PR opens a CI gate.** No bypass without explicit approval.
+5. **Rollback is `git revert`.** The `post-deployment.yml` rollback job is a safety net, not the primary mechanism.

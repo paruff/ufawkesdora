@@ -277,6 +277,13 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: DORA job start
+        run: |
+          echo "job-start:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "sha:${{ github.sha }}"
+          echo "workflow:${{ github.workflow }}"
+          echo "job:${{ github.job }}"
+
       - name: Check results
         run: |
           echo "=== Release Results ==="
@@ -294,3 +301,7 @@ jobs:
 
           echo ""
           echo "Release PASSED"
+
+      - name: DORA job finish
+        if: always()
+        run: echo "job-finish:$(date -u +%Y-%m-%dT%H:%M:%SZ)"

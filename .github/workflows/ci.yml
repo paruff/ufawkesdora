@@ -175,6 +175,13 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: DORA job start
+        run: |
+          echo "job-start:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "sha:${{ github.sha }}"
+          echo "workflow:${{ github.workflow }}"
+          echo "job:${{ github.job }}"
+
       - name: Check results
         run: |
           echo "=== CI Results ==="
@@ -228,3 +235,7 @@ jobs:
           echo "| Tests | ${{ needs.tests.result == 'success' && 'Pass' || 'Fail' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Security (full) | ${{ needs.full-security.result == 'success' && 'Pass' || 'Fail' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Dependency Review | ${{ needs.dependency-review.result == 'success' && 'Pass' || needs.dependency-review.result == 'skipped' && 'N/A' || 'Fail' }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: DORA job finish
+        if: always()
+        run: echo "job-finish:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
