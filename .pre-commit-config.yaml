@@ -32,7 +32,7 @@ repos:
   # Python Linting & Formatting
   # ============================================================================
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.19
+    rev: v0.15.22
     hooks:
       - id: ruff
         name: Lint Python with Ruff
@@ -55,7 +55,7 @@ repos:
   # Markdown Linting
   # ============================================================================
   - repo: https://github.com/igorshubovych/markdownlint-cli
-    rev: v0.49.0
+    rev: v0.49.1
     hooks:
       - id: markdownlint
         name: Lint Markdown files
