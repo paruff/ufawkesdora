@@ -157,7 +157,7 @@ jobs:
     name: Dependency Review
     needs: [build]
     if: github.event_name == 'pull_request'
-    uses: paruff/ufawkespipe/.github/workflows/reusable-dependency-review.yml@v1.1.1
+    uses: paruff/ufawkespipe/.github/workflows/reusable-dependency-review.yml@v1.2.0
     permissions:
       contents: read
       pull-requests: write
