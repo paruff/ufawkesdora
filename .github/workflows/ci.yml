@@ -105,7 +105,7 @@ jobs:
 
   security:
     name: Security Scan
-    uses: paruff/ufawkespipe/.github/workflows/reusable-security-scanning.yml@v1.1.0
+    uses: paruff/ufawkespipe/.github/workflows/reusable-security-scanning.yml@v1.2.0
     permissions:
       contents: read
       security-events: write
@@ -143,7 +143,7 @@ jobs:
   full-security:
     name: Full Security Scan
     needs: [build]
-    uses: paruff/ufawkespipe/.github/workflows/reusable-security-scanning.yml@v1.1.0
+    uses: paruff/ufawkespipe/.github/workflows/reusable-security-scanning.yml@v1.2.0
     permissions:
       contents: read
       security-events: write
