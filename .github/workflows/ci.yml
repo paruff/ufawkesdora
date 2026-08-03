@@ -133,7 +133,7 @@ jobs:
   tests:
     name: Tests
     needs: [build]
-    uses: paruff/ufawkespipe/.github/workflows/reusable-tests.yml@v1.1.0
+    uses: paruff/ufawkespipe/.github/workflows/reusable-tests.yml@v1.2.0
     permissions:
       contents: read
     with:
