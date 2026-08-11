@@ -117,7 +117,7 @@ jobs:
   build:
     name: Build & Validate
     needs: [preflight, lint, security]
-    uses: paruff/ufawkespipe/.github/workflows/reusable-build.yml@v1.1.0
+    uses: paruff/ufawkespipe/.github/workflows/reusable-build.yml@v1.2.0
     permissions:
       contents: read
     with:
